@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine X-Ray // Orchestrator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{--bg:#070b10;--bg2:#0b121a;--steel:#243441;--steel-2:#16202b;
+    --dim:#566571;--ink:#aebcc7;--ink-bright:#dce6ee;
+    --nominal:#43b0a6;--caution:#e0a83a;--critical:#ec4a3c;--verdict:#ff6a3d}
+  *{box-sizing:border-box}html,body{margin:0;height:100%}
+  body{background:radial-gradient(120% 90% at 42% 30%,#0d1822 0%,var(--bg) 64%);
+    color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+  .wrap{display:grid;height:100vh;grid-template-columns:minmax(0,0.96fr) minmax(0,1fr) 300px;grid-template-areas:"engine ring rail"}
+  .stage{position:relative;min-width:0;display:flex;align-items:center;justify-content:center}
+  .stage svg{width:100%;height:100%;max-height:100vh;display:block}
+  .s-engine{grid-area:engine;border-right:1px solid var(--steel-2);background:radial-gradient(78% 64% at 50% 40%,#c4ccd6 0%,#7c8693 33%,#2c343e 64%,#0c121a 88%)}
+  #engine3d{position:absolute;inset:0;cursor:grab}#engine3d:active{cursor:grabbing}
+  #engine3d canvas{display:block}
+  .s-ring{grid-area:ring}
+  .eyebrow{position:absolute;top:18px;left:22px;z-index:3;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase}
+  .eyebrow b{color:var(--ink);font-weight:500}
+  .topright{position:absolute;top:14px;right:16px;z-index:4;display:flex;align-items:center;gap:12px}
+  .hintbar{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.14em;color:#3a4651;text-transform:uppercase}
+  .modebtn{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);background:rgba(7,12,18,.7);border:1px solid var(--steel);border-radius:2px;padding:6px 10px;cursor:pointer;transition:border-color .18s,color .18s}
+  .modebtn:hover{border-color:var(--dim)}.modebtn:focus-visible{outline:2px solid var(--verdict);outline-offset:2px}
+  .detail{position:absolute;left:22px;bottom:20px;width:212px;z-index:3;border:1px solid var(--steel);border-radius:2px;background:rgba(7,12,18,.74);backdrop-filter:blur(3px);padding:12px 13px}
+  .d-name{font-size:13.5px;font-weight:600;color:var(--ink-bright);line-height:1.2}
+  .d-meta{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--dim);letter-spacing:.08em;margin-top:5px;text-transform:uppercase}
+  .d-val{font-family:"IBM Plex Mono",monospace;font-size:22px;color:var(--d-col,var(--nominal));margin-top:6px;transition:color .3s}
+  .d-spark{width:100%;height:30px;margin-top:6px;display:block}
+  .d-hint{font-family:"IBM Plex Mono",monospace;font-size:10px;color:#3a4651;letter-spacing:.1em;margin-top:8px;text-transform:uppercase}
+  .err{max-width:260px;text-align:center;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--caution);line-height:1.6;letter-spacing:.04em}
+  .rail{grid-area:rail;border-left:1px solid var(--steel-2);background:linear-gradient(180deg,var(--bg2),var(--bg));padding:20px 18px;display:flex;flex-direction:column;gap:20px;overflow-y:auto}
+  .rail h1{font-size:13px;font-weight:600;letter-spacing:.04em;margin:0;color:var(--ink-bright)}
+  .rail h1 span{display:block;font-family:"IBM Plex Mono",monospace;font-weight:400;font-size:10px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;margin-top:4px}
+  .verdict-card{border:1px solid var(--steel);border-radius:2px;background:rgba(255,255,255,.012);padding:15px 15px 17px;position:relative;overflow:hidden}
+  .verdict-card::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:var(--state-col,var(--nominal));transition:background .4s}
+  .vc-state{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--state-col,var(--nominal));transition:color .4s}
+  .vc-mode{font-size:18px;font-weight:600;color:var(--ink-bright);margin:8px 0 2px;line-height:1.15;min-height:21px}
+  .vc-sub{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--dim);line-height:1.5}
+  .vc-conf{margin-top:13px}.vc-conf .bar{height:3px;background:var(--steel-2);border-radius:2px;overflow:hidden}
+  .vc-conf .bar i{display:block;height:100%;width:0;background:var(--state-col,var(--nominal));transition:width .25s,background .4s}
+  .vc-conf .lbl{display:flex;justify-content:space-between;font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:6px}
+  .contrib{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px;min-height:21px}
+  .chip{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.04em;padding:3px 7px;border:1px solid var(--steel);border-radius:2px;color:var(--ink);background:rgba(255,106,61,.06)}
+  .sec-lbl{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin:0 0 10px}
+  .scn{display:flex;flex-direction:column;gap:8px}
+  .scn button{text-align:left;font-family:"Space Grotesk",sans-serif;font-size:12.5px;font-weight:500;color:var(--ink);background:transparent;border:1px solid var(--steel);border-radius:2px;padding:9px 11px;cursor:pointer;transition:border-color .18s,background .18s,color .18s;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .scn button .k{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--dim);letter-spacing:.1em}
+  .scn button:hover{border-color:var(--dim);background:rgba(255,255,255,.02)}
+  .scn button:focus-visible{outline:2px solid var(--verdict);outline-offset:2px}
+  .scn button[aria-pressed="true"]{border-color:var(--verdict);color:var(--ink-bright);background:rgba(255,106,61,.07)}
+  .scn button[aria-pressed="true"] .k{color:var(--verdict)}
+  .legend{display:flex;flex-direction:column;gap:7px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--dim);letter-spacing:.04em}
+  .legend div{display:flex;align-items:center;gap:9px}.legend i{width:9px;height:9px;border-radius:50%;flex:none}
+  .foot{margin-top:auto;font-family:"IBM Plex Mono",monospace;font-size:9px;color:#34404b;letter-spacing:.1em;line-height:1.6}
+  @media (max-width:1180px){.wrap{grid-template-columns:1fr 1fr;grid-template-areas:"engine ring" "rail rail"}
+    .rail{flex-direction:row;flex-wrap:wrap;max-height:none;align-items:flex-start}
+    .rail h1,.verdict-card{flex:1 1 240px}.scn{flex:1 1 200px}.legend{flex:1 1 160px}.stage svg{max-height:62vh}}
+  @media (max-width:760px){.wrap{grid-template-columns:1fr;grid-template-areas:"ring" "engine" "rail"}.s-engine{border-right:none;border-top:1px solid var(--steel-2);min-height:48vh}}
+  .tourBtn{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:30;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-bright);background:rgba(11,18,26,.88);border:1px solid var(--verdict);border-radius:3px;padding:11px 20px;cursor:pointer;backdrop-filter:blur(4px);transition:background .18s}
+  .tourBtn:hover{background:rgba(255,106,61,.16)}
+  .tour[hidden]{display:none}
+  .tour{position:fixed;inset:0;z-index:40;pointer-events:none}
+  .tour-spot{position:fixed;left:0;top:0;width:0;height:0;border:1.5px solid var(--verdict);border-radius:5px;box-shadow:0 0 0 9999px rgba(4,7,11,.6);transition:all .42s cubic-bezier(.4,0,.2,1)}
+  .tour-card{position:fixed;width:300px;background:#0c131c;border:1px solid var(--steel);border-left:2px solid var(--verdict);border-radius:3px;padding:16px 16px 14px;z-index:41;pointer-events:auto;box-shadow:0 18px 50px rgba(0,0,0,.55);transition:left .35s cubic-bezier(.4,0,.2,1),top .35s cubic-bezier(.4,0,.2,1)}
+  .tour-step{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--verdict)}
+  .tour-title{font-size:16px;font-weight:600;color:var(--ink-bright);margin:7px 0 6px;line-height:1.2}
+  .tour-body{font-size:13px;line-height:1.55;color:var(--ink)}
+  .tour-more{margin-top:9px;font-size:12px;line-height:1.5;color:var(--dim);border-top:1px solid var(--steel-2);padding-top:9px}
+  .tour-more[hidden]{display:none}
+  .tour-moreBtn{margin-top:9px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline}
+  .tour-nav{display:flex;align-items:center;gap:8px;margin-top:14px}
+  .tour-nav button{font-family:"Space Grotesk",sans-serif;font-size:12px;font-weight:500;border-radius:2px;padding:7px 12px;cursor:pointer;border:1px solid var(--steel);background:transparent;color:var(--ink)}
+  .tour-nav button:disabled{opacity:.4;cursor:default}
+  .tour-nav .next{background:var(--verdict);border-color:var(--verdict);color:#0c131c;font-weight:600}
+  .tour-nav .spacer{flex:1}
+  .tour-exit{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);background:none;border:none;cursor:pointer}
+  .tour-auto{display:flex;align-items:center;gap:5px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage s-engine">
+    <div class="eyebrow">engine&nbsp;//&nbsp;<b>physical state</b></div>
+    <div class="topright"><span class="hintbar">drag · scroll</span><button class="modebtn" id="modebtn">solid</button></div>
+    <div id="engine3d"></div>
+    <div class="detail" id="detail">
+      <div class="d-name" id="dName">Engine subsystems</div>
+      <div class="d-meta" id="dMeta">hover or click a component</div>
+      <div class="d-val" id="dVal">—</div>
+      <svg class="d-spark" id="dSpark" viewBox="0 0 184 30" preserveAspectRatio="none"></svg>
+      <div class="d-hint" id="dHint">color = severity · click to pin</div>
+    </div>
+  </div>
+  <div class="stage s-ring">
+    <div class="eyebrow">orchestrator&nbsp;//&nbsp;<b>combinatorial assessment</b></div>
+    <svg id="ring" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" aria-label="Radial orchestrator"></svg>
+  </div>
+  <aside class="rail">
+    <h1>Engine Health Orchestrator<span>v0 · prototype</span></h1>
+    <div class="verdict-card" id="vcard">
+      <div class="vc-state" id="vstate">monitoring</div>
+      <div class="vc-mode" id="vmode">All systems nominal</div>
+      <div class="vc-sub" id="vsub">No combinatorial signature active.</div>
+      <div class="vc-conf"><div class="lbl"><span>Assessment confidence</span><span id="vconfval">—</span></div><div class="bar"><i id="vconfbar"></i></div></div>
+      <div class="contrib" id="vcontrib"></div>
+    </div>
+    <div><p class="sec-lbl">Inject scenario</p><div class="scn" id="scn"></div></div>
+    <div><p class="sec-lbl">Severity</p><div class="legend">
+      <div><i style="background:var(--nominal)"></i> Nominal</div>
+      <div><i style="background:var(--caution)"></i> Elevated · sub-threshold</div>
+      <div><i style="background:var(--critical)"></i> Individual redline</div>
+      <div><i style="background:var(--verdict)"></i> Combinatorial verdict</div></div></div>
+    <div class="foot">EACH STREAM STAYS BELOW ITS OWN REDLINE.<br>THE VERDICT LIVES IN THE COMBINATION.</div>
+  </aside>
+</div>
+
+<div id="tour" class="tour" hidden>
+  <div class="tour-spot" id="tourSpot"></div>
+  <div class="tour-card" id="tourCard">
+    <div class="tour-step"></div>
+    <div class="tour-title"></div>
+    <div class="tour-body"></div>
+    <button class="tour-moreBtn"></button>
+    <div class="tour-more" hidden></div>
+    <div class="tour-nav">
+      <button class="prev">Back</button>
+      <button class="next">Next</button>
+      <span class="spacer"></span>
+      <label class="tour-auto"><input type="checkbox" id="tourAuto"> auto</label>
+      <button class="tour-exit">exit</button>
+    </div>
+  </div>
+</div>
+<button id="tourBtn" class="tourBtn">&#9658; Guided tour</button>
+
+<script>
+(function(){
+  const reduce=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const streams=[
+    {id:"Pc",name:"Combustion chamber"},{id:"Vib",name:"Turbopump housing"},
+    {id:"Nrpm",name:"Turbopump rotor"},{id:"Tbrg",name:"Pump bearing"},
+    {id:"Qcool",name:"Regen cooling jacket"},{id:"Tnoz",name:"Nozzle (bell)"},
+    {id:"MR",name:"Injector / mixture"},{id:"Pfeed",name:"Propellant feed"}];
+  const nameOf={};streams.forEach(s=>nameOf[s.id]=s.name);
+  const N=streams.length,CAUTION=60,REDLINE=86,HIST=46,BASE=34;
+  const signatures=[
+    {key:"bearing",mode:"Turbopump bearing degradation",members:["Vib","Tbrg","Nrpm"]},
+    {key:"combust",mode:"Combustion instability onset",members:["Pc","Tnoz","MR"]},
+    {key:"feed",mode:"Propellant feed anomaly",members:["Pfeed","MR","Pc"]}];
+  const scenarios={
+    nominal:{label:"Nominal operation",key:"N",off:{}},
+    bearing:{label:"Bearing degradation",key:"1",off:{Vib:34,Tbrg:32,Nrpm:30}},
+    combust:{label:"Combustion instability",key:"2",off:{Pc:33,Tnoz:34,MR:31}},
+    feed:{label:"Feed anomaly",key:"3",off:{Pfeed:35,MR:30,Pc:29}}};
+  const st={};streams.forEach(s=>st[s.id]={v:BASE,hist:Array(HIST).fill(BASE)});
+  let active="nominal";let implicated=new Set();
+  const COL={nominal:"#43b0a6",caution:"#e0a83a",critical:"#ec4a3c",verdict:"#ff6a3d"};
+  const colKey=v=>v>=REDLINE?"critical":v>=CAUTION?"caution":"nominal";
+  const colVar=v=>"var(--"+colKey(v)+")";
+
+  /* ===================== ORCHESTRATOR RING ===================== */
+  const SVG="http://www.w3.org/2000/svg",ring=document.getElementById("ring");
+  const CX=500,CY=500,R=320,HUB=120;
+  const el=(t,a)=>{const e=document.createElementNS(SVG,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+  const nodePos=i=>{const a=-Math.PI/2+i*(2*Math.PI/N);return{a,x:CX+R*Math.cos(a),y:CY+R*Math.sin(a)};};
+  const defs=el("defs");const glow=el("filter",{id:"glow",x:"-60%",y:"-60%",width:"220%",height:"220%"});
+  glow.appendChild(el("feGaussianBlur",{stdDeviation:"6",result:"b"}));
+  const mg=el("feMerge");mg.appendChild(el("feMergeNode",{in:"b"}));mg.appendChild(el("feMergeNode",{in:"SourceGraphic"}));
+  glow.appendChild(mg);defs.appendChild(glow);ring.appendChild(defs);
+  [R+58,R,HUB+46,HUB].forEach((r,i)=>ring.appendChild(el("circle",{cx:CX,cy:CY,r,fill:"none",stroke:"var(--steel-2)","stroke-width":i===1?1.4:1})));
+  for(let i=0;i<120;i++){const a=i*(2*Math.PI/120),r0=R-(i%5===0?14:7);
+    ring.appendChild(el("line",{x1:CX+r0*Math.cos(a),y1:CY+r0*Math.sin(a),x2:CX+R*Math.cos(a),y2:CY+R*Math.sin(a),stroke:"var(--steel-2)","stroke-width":i%5===0?1.1:.6}));}
+  const linkLayer=el("g");ring.appendChild(linkLayer);
+  const hubG=el("g");ring.appendChild(hubG);
+  const hubFill=el("circle",{cx:CX,cy:CY,r:HUB-6,fill:"rgba(67,176,166,0.04)"});
+  const hubArc=el("circle",{cx:CX,cy:CY,r:HUB-6,fill:"none",stroke:"var(--nominal)","stroke-width":2.2,"stroke-linecap":"round","stroke-dasharray":"4 600",transform:`rotate(-90 ${CX} ${CY})`,filter:"url(#glow)"});
+  const hubRing=el("circle",{cx:CX,cy:CY,r:HUB,fill:"none",stroke:"var(--steel)","stroke-width":1.4});
+  hubG.append(hubFill,hubArc,hubRing);
+  const hubLabel=el("text",{x:CX,y:CY-14,"text-anchor":"middle",fill:"var(--dim)","font-family":"IBM Plex Mono, monospace","font-size":"13","letter-spacing":"3"});hubLabel.textContent="MONITORING";
+  const hubBig=el("text",{x:CX,y:CY+20,"text-anchor":"middle",fill:"var(--ink-bright)","font-family":"Space Grotesk, sans-serif","font-size":"30","font-weight":"600"});hubBig.textContent="—";
+  const hubConf=el("text",{x:CX,y:CY+50,"text-anchor":"middle",fill:"var(--dim)","font-family":"IBM Plex Mono, monospace","font-size":"12","letter-spacing":"1.5"});
+  hubG.append(hubLabel,hubBig,hubConf);
+  const nodes=streams.map((s,i)=>{
+    const p=nodePos(i),g=el("g");ring.appendChild(g);
+    const halo=el("circle",{cx:p.x,cy:p.y,r:13,fill:"none",stroke:"var(--verdict)","stroke-width":1.6,opacity:0});
+    const dot=el("circle",{cx:p.x,cy:p.y,r:7,fill:"var(--nominal)",stroke:"var(--bg)","stroke-width":2});g.append(halo,dot);
+    const ux=Math.cos(p.a),uy=Math.sin(p.a),lx=CX+(R+34)*ux,ly=CY+(R+34)*uy;
+    const anchor=ux>0.25?"start":ux<-0.25?"end":"middle";
+    const label=el("text",{x:lx,y:ly-12,"text-anchor":anchor,fill:"var(--ink)","font-family":"Space Grotesk, sans-serif","font-size":"15","font-weight":"500"});label.textContent=s.id;
+    const val=el("text",{x:lx,y:ly+6,"text-anchor":anchor,fill:"var(--dim)","font-family":"IBM Plex Mono, monospace","font-size":"13"});
+    const sw=92,sx=anchor==="start"?lx:anchor==="end"?lx-sw:lx-sw/2,sy=ly+24;
+    g.append(el("line",{x1:sx,y1:sy,x2:sx+sw,y2:sy,stroke:"var(--steel-2)","stroke-width":1}));
+    const spark=el("polyline",{fill:"none",stroke:"var(--nominal)","stroke-width":1.6,"stroke-linejoin":"round",points:""});g.append(spark);g.append(label,val);
+    return {id:s.id,dot,halo,val,spark,sx,sy,sw,sh:22};});
+  const sparkPts=nd=>{const h=st[nd.id].hist,step=nd.sw/(HIST-1);let p="";
+    for(let i=0;i<h.length;i++)p+=(nd.sx+i*step).toFixed(1)+","+(nd.sy-(Math.max(0,Math.min(100,h[i]))/100)*nd.sh).toFixed(1)+" ";return p.trim();};
+  function drawLinks(members){linkLayer.textContent="";if(!members)return;const idx=id=>streams.findIndex(s=>s.id===id);
+    members.forEach(id=>{const p=nodePos(idx(id)),ux=CX-p.x,uy=CY-p.y,len=Math.hypot(ux,uy),hx=CX-ux/len*HUB,hy=CY-uy/len*HUB;
+      const sp=el("line",{x1:p.x,y1:p.y,x2:hx,y2:hy,stroke:"var(--verdict)","stroke-width":1.6,opacity:.55,"stroke-dasharray":"3 7"});sp.classList.add("flow");linkLayer.appendChild(sp);});
+    for(let i=0;i<members.length;i++)for(let j=i+1;j<members.length;j++){const a=nodePos(idx(members[i])),b=nodePos(idx(members[j]));
+      const path=el("path",{d:`M ${a.x} ${a.y} Q ${CX} ${CY} ${b.x} ${b.y}`,fill:"none",stroke:"var(--verdict)","stroke-width":1.8,opacity:.8,"stroke-dasharray":"5 9"});path.classList.add("flow");linkLayer.appendChild(path);}}
+  let dashOff=0;const flow=()=>{if(reduce)return;dashOff-=0.6;linkLayer.querySelectorAll(".flow").forEach(p=>p.setAttribute("stroke-dashoffset",dashOff));};
+
+  /* ===================== DETECTION ===================== */
+  function detect(){let best=null;signatures.forEach(sig=>{const vals=sig.members.map(id=>st[id].v);
+      if(vals.every(v=>v>=CAUTION)&&vals.every(v=>v<REDLINE)){const avg=vals.reduce((a,b)=>a+b,0)/vals.length,conf=Math.max(0,Math.min(1,(avg-CAUTION)/(REDLINE-CAUTION)))*0.42+0.55;
+        if(!best||conf>best.conf)best={sig,conf,members:sig.members};}});
+    if(best)return{kind:"combinatorial",...best};
+    let red=null;streams.forEach(s=>{if(st[s.id].v>=REDLINE&&!red)red=s.id;});
+    if(red)return{kind:"redline",red};
+    const elev=streams.filter(s=>st[s.id].v>=CAUTION).map(s=>s.id);
+    if(elev.length)return{kind:"elevated",elevated:elev};return{kind:"nominal"};}
+  function info(res){
+    if(res.kind==="combinatorial")return{col:"var(--verdict)",state:"combinatorial verdict",mode:res.sig.mode,sub:"Sub-threshold across "+res.members.length+" subsystems — no individual redline.",conf:res.conf,contrib:res.members,active:true};
+    if(res.kind==="redline")return{col:"var(--critical)",state:"redline",mode:res.red+" exceeded",sub:"Single-parameter threshold breach.",conf:.99,contrib:[res.red],active:false};
+    if(res.kind==="elevated")return{col:"var(--caution)",state:"tracking",mode:"Elevated streams",sub:"Elevated but no combinatorial signature complete.",conf:0,contrib:res.elevated,active:false};
+    return{col:"var(--nominal)",state:"monitoring",mode:"All systems nominal",sub:"No combinatorial signature active.",conf:0,contrib:[],active:false};}
+  const $=id=>document.getElementById(id);
+  const vcard=$("vcard"),vstate=$("vstate"),vmode=$("vmode"),vsub=$("vsub"),vconfbar=$("vconfbar"),vconfval=$("vconfval"),vcontrib=$("vcontrib");
+  let curKey=null;
+  function paintVerdict(inf){
+    vcard.style.setProperty("--state-col",inf.col);vstate.textContent=inf.state;vmode.textContent=inf.mode;vsub.textContent=inf.sub;
+    vconfbar.style.width=(inf.conf*100).toFixed(0)+"%";vconfval.textContent=inf.conf?(inf.conf*100).toFixed(0)+"%":"—";
+    vcontrib.innerHTML="";inf.contrib.forEach(id=>{const c=document.createElement("span");c.className="chip";c.textContent=id;vcontrib.appendChild(c);});
+    hubLabel.textContent=inf.state.toUpperCase();hubLabel.setAttribute("fill",inf.col);
+    hubBig.textContent=inf.active?"\u27C1":inf.state==="redline"?"!":inf.state==="monitoring"?"\u2713":"\u25B3";hubBig.setAttribute("fill",inf.col);
+    hubConf.textContent=inf.conf?"CONF "+(inf.conf*100).toFixed(0)+"%":"";
+    hubArc.setAttribute("stroke",inf.col);hubArc.setAttribute("stroke-dasharray",inf.conf?(2*Math.PI*(HUB-6)*inf.conf)+" 9999":"4 600");
+    hubFill.setAttribute("fill",inf.active?"rgba(255,106,61,0.06)":inf.state==="redline"?"rgba(236,74,60,0.05)":"rgba(67,176,166,0.04)");
+    const mem=new Set(inf.contrib);nodes.forEach(nd=>{nd.halo.setAttribute("opacity",(inf.active&&mem.has(nd.id))?0.9:0);nd.halo.setAttribute("stroke",inf.col);});
+    implicated=inf.active?mem:new Set();
+    const key=inf.active?inf.contrib.slice().sort().join(","):"";if(key!==curKey){curKey=key;drawLinks(inf.active?inf.contrib:null);}}
+
+  /* ===================== ENGINE (THREE.JS, DETAILED METAL) ===================== */
+  let hoverId=null,pinId=null,xray=false;
+  const compMap={};const rcTargets=[];const idMat={};
+  let renderer,scene,camera,raycaster,pointer={x:-2,y:-2},engineReady=false,engineRender=function(){};
+  const container=document.getElementById("engine3d");
+  const C3={nominal:new THREE.Color(COL.nominal),caution:new THREE.Color(COL.caution),critical:new THREE.Color(COL.critical),verdict:new THREE.Color(COL.verdict),black:new THREE.Color("#000")};
+
+  function buildEngine(){
+    if(typeof THREE==="undefined"){fail("3D library failed to load. Open with a network connection.");return;}
+    scene=new THREE.Scene();
+    camera=new THREE.PerspectiveCamera(40,1,0.1,200);
+    renderer=new THREE.WebGLRenderer({alpha:true,antialias:true});
+    renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+    renderer.outputEncoding=THREE.sRGBEncoding;
+    renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+    renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+    raycaster=new THREE.Raycaster();
+
+    // environment for metal reflections (procedural gradient)
+    try{
+      const cv=document.createElement("canvas");cv.width=16;cv.height=128;const ctx=cv.getContext("2d");
+      const g=ctx.createLinearGradient(0,0,0,128);g.addColorStop(0,"#eef3f8");g.addColorStop(0.5,"#9fabb8");g.addColorStop(1,"#1b222b");
+      ctx.fillStyle=g;ctx.fillRect(0,0,16,128);
+      const tex=new THREE.CanvasTexture(cv);tex.mapping=THREE.EquirectangularReflectionMapping;tex.encoding=THREE.sRGBEncoding;
+      const pmrem=new THREE.PMREMGenerator(renderer);pmrem.compileEquirectangularShader();
+      scene.environment=pmrem.fromEquirectangular(tex).texture;tex.dispose();
+    }catch(e){}
+
+    // lights — brighter studio setup for a render look
+    scene.add(new THREE.HemisphereLight(0xa6bccc,0x0b0f15,0.75));
+    const key=new THREE.DirectionalLight(0xffffff,1.7);key.position.set(7,12,8);key.castShadow=true;
+    key.shadow.mapSize.set(2048,2048);key.shadow.camera.near=1;key.shadow.camera.far=64;
+    key.shadow.camera.left=-9;key.shadow.camera.right=9;key.shadow.camera.top=12;key.shadow.camera.bottom=-12;key.shadow.bias=-0.0006;scene.add(key);
+    const rim=new THREE.DirectionalLight(0xcfe6ff,0.8);rim.position.set(-8,3,-7);scene.add(rim);
+    const fill=new THREE.DirectionalLight(0xffffff,0.6);fill.position.set(-5,-1,7);scene.add(fill);
+
+    const engine=new THREE.Group();scene.add(engine);
+    const dummy=new THREE.Object3D();
+    const allMats=[];
+    const idBase={Pfeed:"#2a44e0"};
+    function matFor(id){if(!idMat[id]){const blue=id==="Pfeed";const m=new THREE.MeshStandardMaterial({color:new THREE.Color(idBase[id]||"#bcc4cd"),metalness:blue?0.55:0.95,roughness:blue?0.34:0.27,emissive:new THREE.Color("#000"),emissiveIntensity:0,envMapIntensity:1.2});m.userData={metalness:m.metalness,roughness:m.roughness};idMat[id]=m;allMats.push(m);}return idMat[id];}
+    function decorMat(c,me,ro){const m=new THREE.MeshStandardMaterial({color:new THREE.Color(c),metalness:me,roughness:ro,envMapIntensity:1.15});m.userData={metalness:me,roughness:ro};allMats.push(m);return m;}
+    const steelD=decorMat("#aeb6c0",0.95,0.28),blackD=decorMat("#15171c",0.4,0.6),blueD=decorMat("#2a44e0",0.55,0.34),darkSteel=decorMat("#3a424d",0.9,0.4);
+    function reg(id,mesh,interactive){mesh.castShadow=true;mesh.receiveShadow=true;
+      if(!compMap[id])compMap[id]={id,mats:[],meshes:[]};
+      if(compMap[id].mats.indexOf(mesh.material)<0)compMap[id].mats.push(mesh.material);
+      compMap[id].meshes.push(mesh);engine.add(mesh);
+      if(interactive!==false){mesh.userData.id=id;rcTargets.push(mesh);}return mesh;}
+    const v2=(r,y)=>new THREE.Vector2(r,y);
+    const lathe=(pts,seg)=>new THREE.LatheGeometry(pts.map(p=>v2(p[0],p[1])),seg||72);
+    function bolts(id,cx,cy,ringR,count,boltR,boltH){
+      const geo=new THREE.CylinderGeometry(boltR,boltR,boltH,6);const inst=new THREE.InstancedMesh(geo,matFor(id),count);
+      for(let i=0;i<count;i++){const a=i/count*Math.PI*2;dummy.position.set(cx+ringR*Math.cos(a),cy,ringR*Math.sin(a));dummy.rotation.set(0,0,0);dummy.updateMatrix();inst.setMatrixAt(i,dummy.matrix);}
+      inst.instanceMatrix.needsUpdate=true;reg(id,inst,false);return inst;}
+
+    const cr=pts=>new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(p[0],p[1],p[2])));
+    const tube=(c,r,seg)=>new THREE.TubeGeometry(c,seg||44,r,12,false);
+
+    /* ---- smooth brushed bell nozzle (Tnoz) ---- */
+    const meri=[[0.95,-1.2],[1.4,-2.4],[1.78,-3.6],[2.08,-4.8],[2.32,-6.0],[2.55,-7.6]];
+    reg("Tnoz",new THREE.Mesh(lathe(meri,140),matFor("Tnoz")));
+    const inner=new THREE.Mesh(lathe(meri.map(p=>[Math.max(0.02,p[0]-0.04),p[1]]),140),blackD);inner.material.side=THREE.BackSide;engine.add(inner);
+    const collar=reg("Tnoz",new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,0.34,80),matFor("Tnoz")),false);collar.position.y=-1.06;
+    const tflange=reg("Tnoz",new THREE.Mesh(new THREE.TorusGeometry(1.02,0.09,14,80),matFor("Tnoz")),false);tflange.position.y=-1.2;tflange.rotation.x=Math.PI/2;
+    const seam=new THREE.Mesh(new THREE.TorusGeometry(2.12,0.025,8,90),darkSteel);seam.position.y=-5.0;seam.rotation.x=Math.PI/2;engine.add(seam);
+    const lip=reg("Tnoz",new THREE.Mesh(new THREE.TorusGeometry(2.55,0.07,12,90),matFor("Tnoz")),false);lip.position.y=-7.6;lip.rotation.x=Math.PI/2;
+
+    /* ---- combustion chamber + convergent (Pc) ---- */
+    reg("Pc",new THREE.Mesh(lathe([[0.8,0.5],[0.82,0.0],[0.78,-0.4],[0.6,-0.85],[0.5,-1.2]]),matFor("Pc")));
+    [0.3,-0.3].forEach(y=>{const b=reg("Pc",new THREE.Mesh(new THREE.TorusGeometry(0.84,0.04,10,60),matFor("Pc")),false);b.rotation.x=Math.PI/2;b.position.y=y;});
+
+    /* ---- main injector dome + flange + bolts (MR) ---- */
+    const inj=reg("MR",new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.05,0.22,72),matFor("MR")));inj.position.y=0.6;
+    const dome=reg("MR",new THREE.Mesh(new THREE.SphereGeometry(1.0,40,24,0,Math.PI*2,0,Math.PI/2),matFor("MR")),false);dome.position.y=0.7;
+    bolts("MR",0,0.72,0.95,22,0.05,0.16);
+
+    /* ---- twin turbopumps (Vib left, Nrpm right) ---- */
+    function pump(id,px,pz){
+      const body=reg(id,new THREE.Mesh(new THREE.CylinderGeometry(0.6,0.62,1.3,40),matFor(id)));body.position.set(px,1.65,pz);
+      const cap=reg(id,new THREE.Mesh(new THREE.SphereGeometry(0.6,36,22,0,Math.PI*2,0,Math.PI/2),matFor(id)),false);cap.position.set(px,2.3,pz);
+      const fl=reg(id,new THREE.Mesh(new THREE.TorusGeometry(0.62,0.06,12,44),matFor(id)),false);fl.position.set(px,2.3,pz);fl.rotation.x=Math.PI/2;
+      bolts(id,px,2.34,0.55,16,0.04,0.1);
+      [[0.18,0],[-0.15,0.12],[0.05,-0.18]].forEach(s=>{const st2=reg(id,new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.4,10),matFor(id)),false);st2.position.set(px+s[0],2.58,pz+s[1]);});
+    }
+    pump("Vib",-0.95,0.05);
+    pump("Nrpm",0.95,-0.05);
+    const gbx=reg("Tbrg",new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.42,0.7,32),matFor("Tbrg")));gbx.position.set(0,1.15,0.25);
+    const brgR=reg("Tbrg",new THREE.Mesh(new THREE.TorusGeometry(0.4,0.07,12,36),matFor("Tbrg")),false);brgR.position.set(0,1.45,0.25);brgR.rotation.x=Math.PI/2;
+
+    /* ---- cooling manifolds + big side duct (Qcool) ---- */
+    const cman=reg("Qcool",new THREE.Mesh(new THREE.TorusGeometry(0.92,0.08,12,64),matFor("Qcool")));cman.position.y=-0.1;cman.rotation.x=Math.PI/2;
+    const cman2=reg("Qcool",new THREE.Mesh(new THREE.TorusGeometry(1.0,0.07,12,72),matFor("Qcool")),false);cman2.position.y=-1.2;cman2.rotation.x=Math.PI/2;
+    reg("Qcool",new THREE.Mesh(tube(cr([[-0.7,-0.05,0.7],[-0.95,-0.6,0.7],[-0.85,-1.1,0.5]]),0.07),matFor("Qcool")),false);
+    const bigDuct=new THREE.Mesh(tube(cr([[-1.5,1.5,0.2],[-1.75,0.4,0.4],[-1.5,-0.6,0.5],[-1.0,-1.05,0.4]]),0.16,52),steelD);bigDuct.castShadow=true;engine.add(bigDuct);
+
+    /* ---- propellant feed: blue plumbing (Pfeed) ---- */
+    reg("Pfeed",new THREE.Mesh(tube(cr([[-0.95,2.45,0.2],[-0.7,1.7,0.6],[-0.3,1.0,0.7],[0,0.75,0.6]]),0.07),matFor("Pfeed")));
+    reg("Pfeed",new THREE.Mesh(tube(cr([[0.95,2.45,-0.2],[0.7,1.6,0.5],[0.3,1.0,0.6],[0.05,0.75,0.55]]),0.07),matFor("Pfeed")),false);
+    reg("Pfeed",new THREE.Mesh(tube(cr([[-0.6,2.5,0.4],[0,2.7,0.5],[0.6,2.5,0.4]]),0.06),matFor("Pfeed")),false);
+    [[-0.95,0.1],[0.95,-0.1]].forEach(p=>{const d=new THREE.Mesh(tube(cr([[p[0]-0.1,3.5,-0.2],[p[0],2.9,-0.1],[p[0],2.35,0.0]]),0.13,30),steelD);d.castShadow=true;engine.add(d);});
+    [[[-1.0,1.9,0.55],[-0.2,1.6,0.85],[0.6,1.5,0.7],[1.1,1.7,0.4]],
+     [[-1.1,0.6,0.6],[0,0.3,0.95],[1.1,0.5,0.55]],
+     [[1.0,2.0,-0.5],[1.3,1.0,-0.2],[1.1,-0.2,0.2]]].forEach(p=>{const t2=new THREE.Mesh(tube(cr(p),0.045,40),blueD);t2.castShadow=true;engine.add(t2);});
+
+    /* ---- additional powerhead plumbing (decorative detail) ---- */
+    const addTube=(pts,r,mat,seg)=>{const m=new THREE.Mesh(tube(cr(pts),r,seg||44),mat);m.castShadow=true;engine.add(m);};
+    // steel over-the-top arcs
+    [[[-1.1,2.5,-0.3],[-0.6,3.25,-0.1],[0.2,3.35,-0.05],[1.0,2.7,-0.35]],
+     [[-0.9,2.6,0.3],[-0.3,3.15,0.5],[0.5,3.1,0.45],[1.0,2.55,0.25]],
+     [[-0.7,2.7,0.0],[0,3.5,0.15],[0.7,2.7,-0.1]]].forEach(p=>addTube(p,0.045,steelD));
+    // big steel side ducts
+    addTube([[1.2,2.2,-0.4],[1.7,1.2,-0.5],[1.6,0.0,-0.3],[1.0,-0.9,-0.2]],0.13,steelD,52);
+    addTube([[0.9,1.9,-0.6],[1.4,0.9,-0.7],[1.2,-0.2,-0.5]],0.1,steelD);
+    // cross-manifolds between pumps
+    addTube([[-0.95,2.0,0.4],[0,2.2,0.6],[0.95,2.0,0.4]],0.06,steelD);
+    addTube([[-0.95,1.4,-0.5],[0,1.5,-0.65],[0.95,1.4,-0.5]],0.06,steelD);
+    // blue weaves + lines down to the collar
+    [[[-1.0,1.6,0.6],[-0.2,1.9,0.9],[0.6,1.7,0.8],[1.1,1.9,0.4]],
+     [[1.0,1.7,0.5],[0.3,1.3,0.95],[-0.5,1.4,0.85],[-1.05,1.2,0.55]],
+     [[-0.9,2.3,0.2],[0,2.5,0.4],[0.9,2.3,0.2]],
+     [[-0.8,0.4,0.7],[-1.0,-0.4,0.7],[-0.9,-1.0,0.55],[-0.6,-1.06,0.5]],
+     [[0.8,0.4,0.6],[1.0,-0.4,0.6],[0.85,-1.0,0.5],[0.55,-1.06,0.45]]].forEach(p=>addTube(p,0.05,blueD));
+    // top fitting cluster
+    [[-0.2,0.1,0.5],[0.0,-0.15,0.42],[0.15,0.05,0.55],[-0.35,-0.1,0.38],[0.3,0.2,0.46]].forEach(f=>{const c=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,f[2],10),steelD);c.position.set(f[0],2.7+f[2]/2,f[1]);c.castShadow=true;engine.add(c);});
+    // little blue fittings around the nozzle collar
+    [0.6,1.7,2.8,3.9,4.9].forEach(a=>{const c=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,0.22,8),blueD);c.position.set(Math.cos(a)*1.0,-1.0,Math.sin(a)*1.0);c.castShadow=true;engine.add(c);});
+
+    // surface-hugging tubes that follow a body's curvature, then break at a right angle
+    function arcTube(cx,cz,r,y,a0,a1,turn,mat,rad){const pts=[];const steps=12;
+      for(let i=0;i<=steps;i++){const a=a0+(a1-a0)*i/steps;pts.push([cx+r*Math.cos(a),y,cz+r*Math.sin(a)]);}
+      const ex=cx+r*Math.cos(a1),ez=cz+r*Math.sin(a1);
+      if(turn==="up"){pts.push([ex,y+0.5,ez]);pts.push([ex,y+1.1,ez]);}
+      else if(turn==="down"){pts.push([ex,y-0.5,ez]);pts.push([ex,y-1.0,ez]);}
+      else{const ux=Math.cos(a1),uz=Math.sin(a1);pts.push([ex+ux*0.45,y,ez+uz*0.45]);pts.push([ex+ux*0.85,y+0.05,ez+uz*0.85]);}
+      addTube(pts,rad||0.045,mat);}
+    arcTube(-0.95,0.05,0.7,1.9,-0.4,2.0,"up",blueD,0.05);
+    arcTube(-0.95,0.05,0.72,1.3,0.3,2.6,"out",steelD,0.05);
+    arcTube(0.95,-0.05,0.7,2.0,1.2,3.6,"up",steelD,0.045);
+    arcTube(0.95,-0.05,0.72,1.4,0.8,2.9,"out",blueD,0.05);
+    arcTube(0,0,1.12,0.55,-0.6,1.4,"up",blueD,0.05);
+    arcTube(0,0,1.14,0.2,2.4,3.9,"out",steelD,0.05);
+    arcTube(0,0.25,0.46,1.1,0.5,2.8,"up",blueD,0.04);
+
+    // bolt rings fastening sections together
+    function boltRing(cx,cy,cz,ringR,count,axis,mat,br,bh){const geo=new THREE.CylinderGeometry(br||0.04,br||0.04,bh||0.1,6);const inst=new THREE.InstancedMesh(geo,mat||steelD,count);
+      for(let i=0;i<count;i++){const a=i/count*Math.PI*2;
+        if(axis==="x"){dummy.position.set(cx,cy+ringR*Math.cos(a),cz+ringR*Math.sin(a));dummy.rotation.set(0,0,Math.PI/2);}
+        else if(axis==="z"){dummy.position.set(cx+ringR*Math.cos(a),cy+ringR*Math.sin(a),cz);dummy.rotation.set(Math.PI/2,0,0);}
+        else{dummy.position.set(cx+ringR*Math.cos(a),cy,cz+ringR*Math.sin(a));dummy.rotation.set(0,0,0);}
+        dummy.updateMatrix();inst.setMatrixAt(i,dummy.matrix);}
+      inst.instanceMatrix.needsUpdate=true;inst.castShadow=true;engine.add(inst);}
+    boltRing(0,-1.06,0,1.03,40,"y",steelD,0.035,0.09);
+    boltRing(0,-1.22,0,1.04,40,"y",steelD,0.03,0.07);
+    boltRing(0,0.49,0,0.9,26,"y",steelD,0.035,0.09);
+    boltRing(0,0.71,0,1.06,28,"y",steelD,0.03,0.08);
+    boltRing(-0.95,1.0,0.05,0.62,20,"y",steelD,0.03,0.07);
+    boltRing(0.95,1.0,-0.05,0.62,20,"y",steelD,0.03,0.07);
+    boltRing(-0.95,2.0,0.05,0.61,18,"y",steelD,0.028,0.06);
+    boltRing(0.95,2.0,-0.05,0.61,18,"y",steelD,0.028,0.06);
+    boltRing(0,0.8,0.25,0.42,16,"y",steelD,0.028,0.06);
+    boltRing(0,-0.85,0,0.82,22,"y",steelD,0.03,0.07);
+
+    /* ---- black avionics boxes (decorative) ---- */
+    [[-0.15,0.05,0.92,0.55,0.8],[0.4,-0.5,0.82,0.5,0.6]].forEach(b=>{const bx=new THREE.Mesh(new THREE.BoxGeometry(b[3],b[4],0.16),blackD);bx.position.set(b[0],b[1],b[2]);bx.castShadow=true;engine.add(bx);
+      [[-0.13,0.18],[0.13,0.18],[-0.13,-0.18],[0.13,-0.18]].forEach(o=>{const dot=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.05,8),steelD);dot.rotation.x=Math.PI/2;dot.position.set(b[0]+o[0],b[1]+o[1],b[2]+0.09);engine.add(dot);});});
+
+    /* ---- gimbal block (decorative) ---- */
+    const gblk=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.4,0.5),darkSteel);gblk.position.set(0,1.95,0.15);gblk.castShadow=true;engine.add(gblk);
+
+    /* ---- soft contact shadow (studio) ---- */
+    const ground=new THREE.Mesh(new THREE.CircleGeometry(9,64),new THREE.ShadowMaterial({opacity:0.26}));ground.rotation.x=-Math.PI/2;ground.position.y=-7.7;ground.receiveShadow=true;scene.add(ground);
+
+    // store base render params for x-ray toggle
+    Object.values(idMat).forEach(m=>{m.userData.metalness=m.metalness;m.userData.roughness=m.roughness;});
+
+    /* ---- camera orbit ---- */
+    const target=new THREE.Vector3(0,-2.8,0);
+    let theta=0.5,phi=1.28,radius=22;
+    const applyCam=()=>{camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);};
+    let dragging=false,lx=0,ly=0,idle=0;const dom=renderer.domElement;
+    dom.addEventListener("pointerdown",e=>{dragging=true;lx=e.clientX;ly=e.clientY;idle=0;dom.setPointerCapture(e.pointerId);});
+    dom.addEventListener("pointerup",()=>dragging=false);
+    dom.addEventListener("pointermove",e=>{const r=dom.getBoundingClientRect();pointer.x=((e.clientX-r.left)/r.width)*2-1;pointer.y=-((e.clientY-r.top)/r.height)*2+1;
+      if(dragging){theta-=(e.clientX-lx)*0.008;phi=Math.max(0.45,Math.min(2.3,phi-(e.clientY-ly)*0.008));lx=e.clientX;ly=e.clientY;idle=0;}});
+    dom.addEventListener("pointerleave",()=>{pointer.x=-2;pointer.y=-2;});
+    dom.addEventListener("wheel",e=>{e.preventDefault();radius=Math.max(9,Math.min(30,radius+e.deltaY*0.013));idle=0;},{passive:false});
+    dom.addEventListener("click",()=>{if(hoverId)pinId=pinId===hoverId?null:hoverId;});
+    const resize=()=>{const w=container.clientWidth||600,h=container.clientHeight||600;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();};
+    window.addEventListener("resize",resize);resize();applyCam();
+
+    const comps=Object.values(compMap);
+    window.__setXray=function(on){xray=on;allMats.forEach(m=>{
+      if(on){m.transparent=true;m.opacity=0.32;m.depthWrite=false;m.metalness=0.2;m.roughness=0.85;m.blending=THREE.AdditiveBlending;}
+      else{m.transparent=false;m.opacity=1;m.depthWrite=true;m.metalness=m.userData.metalness;m.roughness=m.userData.roughness;m.blending=THREE.NormalBlending;}
+      m.needsUpdate=true;});ground.visible=!on;};
+
+    engineReady=true;
+    engineRender=function(t){
+      if(!dragging){idle+=0.016;if(idle>1.5&&!reduce)theta+=0.0015;}
+      applyCam();
+      if(pointer.x>-1.5){raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObjects(rcTargets,false);hoverId=hits.length?hits[0].object.userData.id:null;}else hoverId=null;
+      const pulse=0.5+0.5*Math.sin(t*0.0032);
+      comps.forEach(c=>{const v=st[c.id].v;let emi,inten;
+        if(implicated.has(c.id)){emi=C3.verdict;inten=(xray?0.5:0.55)+0.6*pulse;}
+        else{const k=colKey(v);emi=k==="nominal"?C3.black:C3[k];inten=k==="nominal"?(xray?0.18:0):k==="caution"?0.5:0.95;if(xray&&k==="nominal")emi=C3.nominal;}
+        const hov=(hoverId===c.id||pinId===c.id);if(hov){inten+=0.4;if(emi===C3.black)emi=C3.nominal;}
+        c.mats.forEach(m=>{m.emissive.copy(emi);m.emissiveIntensity=inten;});});
+      renderer.render(scene,camera);};
+  }
+  function fail(msg){container.innerHTML='<div class="err">'+msg+'</div>';container.style.display="flex";container.style.alignItems="center";container.style.justifyContent="center";}
+  try{buildEngine();}catch(err){fail("3D init error: "+err.message);}
+
+  // mode toggle button
+  const modebtn=document.getElementById("modebtn");
+  modebtn.addEventListener("click",()=>{const on=!xray;if(window.__setXray)window.__setXray(on);modebtn.textContent=on?"x-ray":"solid";});
+
+  /* ===================== ENGINE DETAIL PANEL ===================== */
+  const dName=$("dName"),dMeta=$("dMeta"),dVal=$("dVal"),dHint=$("dHint"),dSpark=$("dSpark");
+  function paintDetail(){const id=hoverId||pinId;
+    if(!id){dName.textContent="Engine subsystems";dMeta.textContent="hover or click a component";dVal.textContent="—";dVal.style.setProperty("--d-col","var(--dim)");dSpark.innerHTML="";dHint.textContent=engineReady?"color = severity · click to pin":"";return;}
+    const v=st[id].v,c=colVar(v),sevW=v>=REDLINE?"redline":v>=CAUTION?"elevated":"nominal";
+    dName.textContent=nameOf[id];dMeta.textContent=id+" · "+sevW;dVal.textContent=v.toFixed(1);dVal.style.setProperty("--d-col",c);
+    dHint.textContent=pinId===id?"pinned · click to release":"click to pin";
+    const h=st[id].hist,step=184/(HIST-1);let pts="";
+    for(let i=0;i<h.length;i++)pts+=(i*step).toFixed(1)+","+(30-(Math.max(0,Math.min(100,h[i]))/100)*28).toFixed(1)+" ";
+    dSpark.innerHTML='<polyline fill="none" stroke="'+c+'" stroke-width="1.6" stroke-linejoin="round" points="'+pts.trim()+'"/>';}
+
+  /* ===================== LOOP ===================== */
+  let last=performance.now(),acc=0;
+  function tick(now){const dt=Math.min(50,now-last);last=now;acc+=dt;
+    const off=scenarios[active].off;
+    streams.forEach(s=>{const target=BASE+(off[s.id]||0),cur=st[s.id].v;st[s.id].v=Math.max(2,Math.min(99,cur+(target-cur)*0.045+(Math.random()-0.5)*1.1));});
+    if(acc>=83){acc=0;streams.forEach(s=>{const h=st[s.id].hist;h.push(st[s.id].v);if(h.length>HIST)h.shift();});}
+    nodes.forEach(nd=>{const v=st[nd.id].v,c=colVar(v);nd.dot.setAttribute("fill",c);nd.dot.setAttribute("r",v>=CAUTION?8.5:7);nd.val.textContent=v.toFixed(1);nd.spark.setAttribute("stroke",c);nd.spark.setAttribute("points",sparkPts(nd));});
+    paintVerdict(info(detect()));
+    if(engineReady)engineRender(now);
+    paintDetail();flow();
+    requestAnimationFrame(tick);}
+  requestAnimationFrame(tick);
+
+  /* ===================== CONTROLS ===================== */
+  const scn=$("scn");
+  Object.entries(scenarios).forEach(([k,cfg])=>{const b=document.createElement("button");b.setAttribute("aria-pressed",k===active);
+    b.innerHTML='<span>'+cfg.label+'</span><span class="k">'+cfg.key+'</span>';
+    b.addEventListener("click",()=>{active=k;curKey=null;[...scn.children].forEach(c=>c.setAttribute("aria-pressed",c===b));});scn.appendChild(b);});
+  const byKey={N:"nominal","1":"bearing","2":"combust","3":"feed"};
+  window.addEventListener("keydown",e=>{const k=e.key.toUpperCase();if(byKey[k]){active=byKey[k];curKey=null;[...scn.children].forEach((c,i)=>c.setAttribute("aria-pressed",Object.keys(scenarios)[i]===active));}});
+
+  /* ===================== GUIDED TOUR ===================== */
+  function setScenario(k){active=k;curKey=null;[...scn.children].forEach((c,i)=>c.setAttribute("aria-pressed",Object.keys(scenarios)[i]===k));}
+  const TOUR=[
+    {step:"01 / 07",title:"Two views, one system",scenario:"nominal",target:{sel:".wrap"},
+     body:"Left is the engine — the physical truth. Right is the orchestrator — the reasoning layer watching over it. Both are driven by the same live stream of data."},
+    {step:"02 / 07",title:"Live subsystem streams",scenario:"nominal",target:{sel:"#ring"},
+     body:"Each subsystem continuously reports a severity signal. Right now everything is nominal — well below any limit.",
+     more:"Every sensor is wrapped by a pluggable detector that normalizes its raw signal into one common format — a severity and a confidence — so detectors can be swapped without touching the orchestrator."},
+    {step:"03 / 07",title:"Failure data, authored in plain language",scenario:"nominal",target:{sel:"#scn"},
+     body:"These failure scenarios aren't hand-coded. An engineer describes a failure mode in plain language and an LLM synthesizes telemetry that reproduces it — so realistic failure data exists on demand, without waiting for scarce real-world failures.",
+     more:"The LLM only proposes scenario parameters; a deterministic, physics-aware layer validates them so nothing unphysical reaches the system. The model proposes, physics constrains."},
+    {step:"04 / 07",title:"Each one stays safe — alone",scenario:"bearing",target:{sel:"#ring"},
+     body:"Watch three subsystems climb into the amber. Crucially, not one crosses its own redline. Any single-alarm system sees nothing wrong here."},
+    {step:"05 / 07",title:"The combination is the signal",scenario:"bearing",target:{center:"#ring",size:210},
+     body:"The orchestrator correlates across streams and raises a verdict — naming the failure mode — purely from the joint pattern. That's the whole idea: the danger lives in the combination, not in any single reading.",
+     more:"v1 matches known multi-signal signatures (explainable: this pattern = this named mode). v2 swaps in learned interaction detection to surface combinations no one defined in advance."},
+    {step:"06 / 07",title:"Reasoning points back at the metal",scenario:"bearing",target:{sel:".s-engine"},
+     body:"The implicated subsystems light up on the engine itself — so an operator sees not just that something is wrong, but where, in physical context."},
+    {step:"07 / 07",title:"Built to grow",scenario:"nominal",target:{sel:".wrap"},
+     body:"Pluggable detectors feed a combinatorial orchestrator, which emits a decision through a safety layer. The next version closes the loop — attempting a reduced-thrust mode and continuously re-checking it, instead of a simple shutdown.",
+     more:"Clean interfaces at every seam mean the simple v1 simulators can be replaced with higher-fidelity models — or a live data feed — without changing the orchestrator."}
+  ];
+  const tourEl=$("tour"),spot=$("tourSpot"),card=$("tourCard"),tourBtn=$("tourBtn"),autoChk=$("tourAuto");
+  let ti=0,autoTimer=null,lastR=null;
+  function rectFor(t){if(t.center){const e=document.querySelector(t.center).getBoundingClientRect();const s=t.size||180;return{left:e.left+e.width/2-s/2,top:e.top+e.height/2-s/2,width:s,height:s};}const r=document.querySelector(t.sel).getBoundingClientRect();const p=8;return{left:r.left+p,top:r.top+p,width:Math.max(40,r.width-2*p),height:Math.max(40,r.height-2*p)};}
+  function positionCard(R){const vw=innerWidth,vh=innerHeight,cw=300,ch=card.offsetHeight||220,cx=R.left+R.width/2;let left,top;
+    if(R.width>vw*0.6){left=vw/2-cw/2;top=vh-ch-26;}
+    else if(cx>vw/2){left=R.left-cw-20;top=R.top;if(left<12)left=R.left+R.width+20;}
+    else{left=R.left+R.width+20;top=R.top;if(left+cw>vw-12)left=R.left-cw-20;}
+    card.style.left=Math.max(12,Math.min(left,vw-cw-12))+"px";card.style.top=Math.max(12,Math.min(top,vh-ch-12))+"px";}
+  function showStep(i){ti=Math.max(0,Math.min(TOUR.length-1,i));const s=TOUR[ti];if(s.scenario)setScenario(s.scenario);
+    lastR=rectFor(s.target);spot.style.left=lastR.left+"px";spot.style.top=lastR.top+"px";spot.style.width=lastR.width+"px";spot.style.height=lastR.height+"px";
+    card.querySelector(".tour-step").textContent=s.step;card.querySelector(".tour-title").textContent=s.title;card.querySelector(".tour-body").textContent=s.body;
+    const mEl=card.querySelector(".tour-more"),mBtn=card.querySelector(".tour-moreBtn");
+    if(s.more){mBtn.style.display="";mEl.textContent=s.more;mEl.hidden=true;mBtn.textContent="+ deeper detail";}else{mBtn.style.display="none";mEl.hidden=true;}
+    card.querySelector(".prev").disabled=ti===0;card.querySelector(".next").textContent=ti===TOUR.length-1?"Finish":"Next";
+    positionCard(lastR);}
+  function startTour(){tourEl.hidden=false;tourBtn.style.display="none";showStep(0);if(autoChk.checked)scheduleAuto();}
+  function endTour(){tourEl.hidden=true;tourBtn.style.display="";stopAuto();setScenario("nominal");}
+  function nextStep(){if(ti>=TOUR.length-1){endTour();return;}showStep(ti+1);if(autoChk.checked)scheduleAuto();}
+  function prevStep(){showStep(ti-1);if(autoChk.checked)scheduleAuto();}
+  function scheduleAuto(){stopAuto();autoTimer=setTimeout(()=>{ti<TOUR.length-1?nextStep():endTour();},7000);}
+  function stopAuto(){if(autoTimer){clearTimeout(autoTimer);autoTimer=null;}}
+  tourBtn.addEventListener("click",startTour);
+  card.querySelector(".next").addEventListener("click",nextStep);
+  card.querySelector(".prev").addEventListener("click",prevStep);
+  card.querySelector(".tour-exit").addEventListener("click",endTour);
+  card.querySelector(".tour-moreBtn").addEventListener("click",()=>{const m=card.querySelector(".tour-more");m.hidden=!m.hidden;card.querySelector(".tour-moreBtn").textContent=m.hidden?"+ deeper detail":"\u2013 hide detail";if(lastR)positionCard(lastR);});
+  autoChk.addEventListener("change",()=>{if(autoChk.checked&&!tourEl.hidden)scheduleAuto();else stopAuto();});
+  window.addEventListener("keydown",e=>{if(tourEl.hidden)return;if(e.key==="Escape")endTour();else if(e.key==="ArrowRight")nextStep();else if(e.key==="ArrowLeft")prevStep();});
+  window.addEventListener("resize",()=>{if(!tourEl.hidden)showStep(ti);});
+})();
+</script>
+</body>
+</html>

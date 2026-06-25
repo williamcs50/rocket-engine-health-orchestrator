@@ -1,0 +1,152 @@
+﻿Rocket Engine Health Orchestrator
+A research prototype for combinatorial fault detection in rocket engines.
+
+
+________________
+
+
+1. Thesis
+When a rocket engine fails, the failure has underlying causes — a bearing degrading, a valve mis-commanding, combustion turning unstable — that show up across the sensors as they develop. Often they show up quietly and across many channels at once: vibration creeping up, a temperature trending warm, a pressure easing down, each within its own limit but together forming the fault's signature. Conventional monitoring watches each channel against its own redline, and is structurally blind to this class of failure — the evidence is distributed, and no single channel breaks its limit until the fault is well advanced. Catching these coupled, sub-threshold faults is hard, and this project explores one approach to it.
+
+
+The approach is to detect faults from their combined signature rather than from any single channel. Rather than watch readings in isolation, the system learns the engine's normal command-to-response behavior — given the controls and current state, what the channels should do — and flags departures from it. Trained on a system's abundant normal operating history rather than its scarce failures, it ignores benign changes that are merely the expected response to a command, and is combinatorial by construction. Each sensor is treated as its own kind of signal: a dedicated encoder turns each channel into a common representation, and an attention layer fuses those representations to weigh the channels against one another. The output is a verdict that flags the anomaly and surfaces the channels the model weighted most heavily in reaching it — potentially earlier than single-channel redline detection. In production this would learn from real engine telemetry; in this prototype it learns from a reduced-order physics model that generates nominal operation and injects faults as physical perturbations, so their signatures emerge through the model's couplings rather than being drawn by hand (Section 4).
+
+
+This is a research prototype — not a deployable or certifiable system — and it is positioned as an advisory layer above an engine's existing deterministic redline protection, which retains authority. It illustrates one possible orchestration approach: per-channel encoders fused by attention, built on the explicit working assumption that the model's attention weighting indicates which channels are relevant to a verdict — a useful signal for surfacing and triage, not a claim of proven cause. It is also a framework meant to be extended; the most natural next step is to layer graph attention over a learned channel-influence topology, so that the relationships between channels — and the back-tracing of a verdict to them — become explicit objects the system reasons over rather than implicit weights (Section 6).
+
+
+________________
+
+
+2. What we're building
+The project has three built components: a monitoring system, the physics-based synthetic data generator it runs against, and a visualization layer that makes its reasoning legible.
+
+
+The monitoring system sits above an engine's existing redline protection and watches the channels in combination. It has three parts and an output:
+
+
+* Encoders — one per channel. Each turns a raw sensor stream into a common representation the fusion layer can consume. Most channels use lightweight encoders; a few use learned models where the signal's structure warrants it, but all expose the same interface, so the layer above never depends on how any given channel is processed. The encoders also emit a simple, human-readable signal per channel — how far it sits from learned-normal — that runs alongside the learned representation for interpretation and display.
+
+
+* The command-to-response model — what makes those signals meaningful. It learns, from normal operating history, how the channels should respond to the control inputs and current state, so the system can distinguish a real fault from a commanded change: a pressure rising because the engine was throttled up is expected; the same rise without the command is not.
+
+
+* The orchestrator — the system's core. It fuses the per-channel representations with an attention layer that weighs the channels against one another, and raises a verdict: an anomaly flag and the channels the model weighted most heavily in reaching it. This is the combinatorial step the whole system is named for — reading the channels together rather than waiting for one to cross its redline.
+
+
+The physics-based synthetic data generator produces the data the system runs against. A reduced-order engine model generates nominal telemetry with realistic cross-channel correlation, and faults are injected as physical perturbations so their multi-channel signatures emerge through the model's couplings rather than being drawn by hand. In production this is replaced by real engine telemetry; here it stands in for it, and is itself a core deliverable — you cannot test failure detection without manufacturing failures (Section 4).
+
+
+The visualization layer turns the system's state and reasoning into something a human reads at a glance. It uses color to encode severity, spatial layout to separate physical state (a live 3-D engine view) from assessment (the orchestrator), and motion to show the verdict forming and the link back to the implicated hardware — with a guided tour that walks a first-time viewer through the whole idea unattended. The implicated-channel display visualizes the fusion layer's attention weighting directly: it shows which channels the model leaned on, offered as decision-support and a back-tracing starting point, on the stated assumption that weighting indicates relevance rather than proven cause. This is both the demonstration vehicle for the project and a prototype of the operator-facing layer a real system would need — an assessment is only useful if a human can act on it, and high-dimensional, correlated state is exactly what a person cannot read from raw numbers (Section 5).
+
+
+Every part crosses a defined interface — raw streams in, common per-channel representations to the fusion layer, a verdict out — so each can be built, tested, and upgraded independently, and so the generator can be swapped for real telemetry without touching the logic above it.
+
+
+________________
+
+
+3. Architecture
+The monitoring system is a pipeline: per-channel encoders turn each sensor stream into a common representation, an attention layer fuses those representations into a verdict, and the whole thing sits above the engine's existing redline protection, which keeps authority.
+
+
+Channels and encoders. v1 models eight representative channels. Each is processed by an encoder matched to the structure of its signal, and every encoder — whatever its internals — emits a fixed-length embedding vector of dimension d, projected into a shared space, so the fusion layer sees a uniform set of tokens and never depends on how any channel was produced. Alongside the embedding, each encoder emits a simple human-readable departure-from-normal score for interpretation and display.
+
+
+* Five channels (chamber pressure, bearing and nozzle temperatures, coolant flow, feed pressure) use lightweight statistical encoders: the embedding is built from a residual against expected behavior, with rate or variance terms where the failure physics call for it. These are cheap and legible, and they are most of the system.
+* One channel (turbopump vibration) uses a small convolutional encoder. Vibration carries waveform and frequency-band structure — broadband energy, emerging tones — that a scalar residual cannot represent, so it emits its learned feature vector as the token.
+* Two channels whose meaning is inherently dynamic (shaft speed, mixture ratio) are handled by the command-to-response model below, which emits its hidden state as their representation, rather than being judged in isolation.
+
+
+The shared embedding interface is what makes the system modular: an encoder can be swapped — statistical for learned, or a new channel added — without changing anything above it. This is what lets the eight-channel prototype scale, in principle, to the hundreds of channels a real engine carries.
+
+
+The command-to-response model. A recurrent model learns, from normal operating history, how the channels should respond to the control inputs and current state. The deviation of actual from expected is what separates a real fault from a commanded change: a pressure rising because the engine was throttled up is expected; the same rise without the command is not. This is the organizing idea beneath the whole detection layer — every encoder is, in effect, comparing its channel to what the commands and state say it should be doing — and the recurrent model is the implementation for the channels whose expected response depends on time history rather than the current operating point alone.
+
+
+The orchestrator. An attention layer takes the per-channel embeddings as tokens, each tagged with a learned channel identity, and weighs them against one another to produce the verdict: an anomaly flag and the channels it weighted most heavily. Treating the channels as a set that attention fuses is what makes the system combinatorial — the signal lives in the combination, whether that combination is a temporal cascade or a simultaneous coincidence. Because the data is authored, the verdict is measurable two ways: detection accuracy (did it flag the injected fault, in time?) is provable against ground truth, and the implicated-channel weighting can be shown to align with the channels the fault actually perturbed — a real, positive result — while remaining, by its nature, an indication of relevance rather than proof of causal faithfulness, and bounded by the synthetic scenarios it was demonstrated on. Confidence is reported as a calibrated measure of how far behavior sits from learned-normal, most reliable in the regime the model has seen and least on behavior unlike its training.
+
+
+Position in the stack. The system is advisory. It runs above the deterministic redline protection, which retains all authority to act; the orchestrator informs decisions, it does not make them. Using a verdict to weigh continuing, throttling down to reduce stress on a suspect subsystem and reassessing, or shutting down is a decision the flight rules and the people who own them make — and richer response logic can attach to the verdict later (Section 6) without changes below.
+
+
+Interfaces. Three boundaries are fixed: raw streams into encoders, embeddings into the fusion layer, a verdict out. Holding these stable is what lets each stage be built, tested, and replaced independently — including swapping the synthetic data source for real telemetry (Section 4) without touching the logic above it.
+Sidebar — Build discipline
+The design is shaped to be built correctly, not just described. Four properties make that possible:
+
+
+* Frozen contracts. The embedding dimension d, the eight channels, and the verdict object are fixed interface constants. Every encoder targets them; each stage is built and tested against them independently, so the pieces compose without integration surprises.
+* The generator is the test oracle. Because faults are authored (Section 4), every detection claim is checkable: known fault in, expected verdict out. This makes the system's behavior test-driven — scenario tests specify the expected verdict before the logic exists — with the learned components governed by property and acceptance tests (trains, emits a valid embedding, scores nominal low and faults higher) rather than exact-output tests.
+* Honest data separation. Training, calibration, and fault-injection test sets are generated separately and kept disjoint — the rule that keeps self-generated data from grading its own homework.
+* Walking skeleton first. One channel, one fault, end-to-end through encoder → fusion → verdict → display before any stage is enriched — so there is always a working system, and effort concentrates on the combinatorial core rather than scattering across the supporting pieces.
+
+
+________________
+
+
+4. Data generation & validation
+The system needs data it does not have: a real engine's operating history, and examples of the faults it is meant to catch. The first is abundant in production and absent here; the second is scarce everywhere. The physics-based synthetic data generator supplies both for the prototype, and its design is what separates a demonstration that proves something from one that merely looks impressive.
+
+
+Nominal data — a reduced-order model on a duty cycle. A small dynamical model relates a handful of engine state variables — chamber pressure, pump speed, temperatures, flows — through simplified physics and realistic time constants. It is driven through an operating profile (startup ramp, steady state, throttle changes, shutdown) and layered with the things that make real telemetry real: sensor noise, slight channel-to-channel lag, calibration offsets, and small run-to-run variation. The output is plausible nominal telemetry with the correct correlation structure between channels — which matters, because that cross-channel correlation is exactly what the system learns as normal. Random per-channel noise would not have it; a coupled model does.
+
+
+The command stream. The operating profile is the command — throttle and mixture setpoints, sequencing — and it is generated once and shared. The model uses it to produce the response; the monitoring system uses it as the "what was commanded" input against which it judges the response. This mirrors production, where both the engine and the monitor see the real controller's commands. The command is legitimately shared; nothing else is.
+
+
+Fault data — the same model, perturbed. Because faults are physical degradations, they are injected as parameter changes in that same model, not as edits to the output traces. Bearing degradation is a rising friction term plus a bearing-thermal term over time; its signature in vibration, bearing temperature, and the speed-correction effort then emerges through the model's couplings on its own. This is the central move: you perturb a cause and let the multi-channel signature follow from the physics, rather than drawing the answer into the data. It is also how fault-injection testbeds actually work.
+
+
+The discipline that keeps it honest. The generator authors the faults, so it holds ground truth — which channels were perturbed, when, how hard. That makes it the system's test oracle (Section 3's sidebar), but only if two rules hold. First, the monitoring system sees the command and the telemetry, never the injected fault — the command is shared, the fault is hidden, or detection is circular. Second, the faults must be genuinely sub-threshold and entangled with the noise and variation, not conveniently obvious; a fault the model can detect because it was drawn too cleanly proves nothing. The validating comparison is therefore against a baseline: on the same data, a conventional redline check should miss what the orchestrator catches. Without that contrast, the combinatorial claim is unsupported; with it, the contrast is the result.
+
+
+The fidelity ceiling, stated plainly. This is a reduced-order model, not a validated simulation of any engine. The claim is that its behavior is physically plausible and correctly coupled — enough to make the failure signatures real and the detection problem genuine — not that it is accurate to a specific engine. That ceiling is deliberate: higher fidelity is a known upgrade path, and the seam is clean, because the generator and a real telemetry feed produce the same thing — multi-channel time series on the same interface — so real history replaces the model without changing the logic above it (Section 3).
+
+
+________________
+
+
+5. The demonstration
+The demonstration exists because the system's value has to survive a cold open: someone who has never seen it, opening a link on their own time, with no one there to explain it. If the idea isn't legible in the first minute, the work behind it doesn't land. So the interface is not packaging around the system — it is the system's answer to its own problem (a human cannot read high-dimensional correlated state from raw numbers) applied to the human looking at it.
+
+
+The layout carries the idea. The screen is split: on the left, a live 3-D view of the engine — the physical truth; on the right, the orchestrator — the reasoning. Sensors on one side, sense-making on the other. That spatial separation does explanatory work before a word is read: the viewer sees a thing, and a thing thinking about the thing.
+
+
+Color, motion, and coupling do the rest. Severity is color — channels and the engine subsystems they map to tint from calm to hot as they drift, so the eye finds trouble without hunting. The verdict is drawn: when the orchestrator reaches one, the implicated channels brighten and route inward to the hub, and the corresponding parts of the engine glow in sync. That coupling — reasoning on the right pointing back at physical truth on the left — is the combinatorial thesis made visible: several channels, each unremarkable alone, lighting up together into a named assessment while no single one has crossed a redline.
+
+
+The implicated-channel display is honest about what it shows. The channels that light up are the ones the fusion layer weighted most heavily — a direct view of the model's attention, offered as a starting point for "where to look," on the stated understanding that weighting indicates relevance, not proven cause. The display visualizes what the model actually did, not a story laid over it.
+
+
+The guided tour makes it self-explaining. A first-time viewer can press one button and be walked through the whole idea in sequence — what the two sides are, how a single subsystem reads, how a failure mode is authored and injected, and then the moment that matters: the orchestrator raising a verdict from a combination that no individual redline would catch. The tour drives the live system as it narrates, so the viewer watches the thing happen rather than reading a caption about it. Crucially, it can show the contrast directly — the same drift that the orchestrator flags, sitting quietly under every individual limit — which is the project's claim turned into something you can see.
+
+
+The demonstration's narration tracks whatever mechanism is actually running underneath, so the most visible artifact never describes a system other than the one that exists.
+
+
+________________
+
+
+6. Roadmap & open problems
+The prototype is deliberately the first rung of a ladder, and the design exists to make the next rungs reachable without rebuilding. The path forward and the honest unknowns are the same territory, so they are stated together.
+
+
+Versioning — what gets turned on, in order.
+
+
+* v1 (this build): the full pipeline — per-channel encoders, the command-to-response model, attention fusion, a verdict, and the demonstration — on synthetic data, advisory, fusing over a flat set of channels.
+* Next — learned fusion deepened. v1 establishes the embedding interface and the attention orchestrator; the immediate extension is to push more of the detection weight into the learned fusion and harden it against the richer fault library the generator can produce.
+* Then — graph attention over a learned channel-influence topology. Rather than fuse a flat set, the system learns which channels influence which and reasons over that structure. This is the most consequential step, because the learned graph is not only a detector but an explanation: a verdict traces to a connected subgraph of channels rather than a bag of attention weights. It is the natural successor to v1's architecture and the direction the broader field of multivariate time-series anomaly detection is actively moving.
+* In parallel — response, not just detection. Today the system advises. The forward path is graduated response: using a verdict to weigh continuing, throttling a suspect subsystem down to reduce its stress and re-evaluating under the lighter load, or shutting down — eventually as a closed loop, where the same detection that raised the concern watches whether the compromised mode is holding. This requires a higher-fidelity, responsive model than v1's, which is why it sits later on the ladder.
+
+
+Open problems — the hard edges, stated as research, not apology.
+
+
+* Faithful explanation. The implicated-channel weighting can be shown to align with authored ground truth, but demonstrated alignment within synthetic scenarios is not proof of causal faithfulness, and need not generalize to faults outside that distribution. Establishing trustworthy back-tracing — knowing not just that a verdict is right but why, faithfully — is unsolved, and the graph-structure direction above is one concrete way to attack it.
+* Trust under novelty. Learned components are most confident where they have the least basis to be — on behavior unlike their training. A system meant to catch the unprecedented is, by construction, least sure exactly there. Quantifying and bounding that is open.
+* Authority and certification. This system advises; deterministic protection retains authority. Moving learned methods toward any role with real authority runs into validation and certification questions the field has not settled. The advisory placement is not a temporary limitation to engineer away — it reflects where trust in these methods actually stands.
+
+
+None of these is a reason the work is premature. They are the reason it is worth doing: a clean, demonstrable, honestly-bounded take on a problem whose hard parts are genuinely open is a contribution to a live question, not a reimplementation of a settled one.
