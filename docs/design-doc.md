@@ -1,7 +1,7 @@
 # Rocket Engine Health Orchestrator: Design Rationale
 
 **Author:** William Opyrchal  
-**Date:** June 26, 2026
+**Date:** July 14, 2026
 
 ## Summary
 
@@ -17,7 +17,7 @@ I started with the simplest possible case: one sensor channel. What does the mod
 
 When scaling to many channels, I considered grouping similar channels together and giving each group its own encoder. I rejected that because per-channel encoders give the fusion layer something cleaner to work with: each embedding maps to one physical quantity, so the attention weights produced by the fusion layer map directly back to individual sensors. That is what makes the output legible to an operator. A group embedding is a blend, and when the fusion layer attends to it, the engineer cannot ask what happened in any specific channel within that group. Per-channel keeps the interpretability story intact end to end. I also considered a single monolithic transformer over all raw channels concatenated together, but rejected it because the model would have to deal with mismatched scales, units, and physics all at once.
 
-The biggest practical challenge was avoiding false alarms during commanded changes. When the controller issues a throttle-down or valve movement, a lot of sensor channels will legitimately shift at the same time. Without context, those normal movements look like faults. I considered concatenating command signals as extra input channels, but rejected that because it gives commands no structural priority and the model could learn to ignore them. I also considered baking command context directly into each encoder, but rejected that too because it would couple the encoders more tightly to command logic and make the architecture less modular. Instead I kept the encoders focused purely on sensor data and handled command context in the fusion layer through cross-attention to a short command history sequence.
+The biggest practical challenge was avoiding false alarms during commanded changes. When the controller issues a throttle-down, a lot of sensor channels will legitimately shift at the same time. Without context, those normal movements look like faults. I considered concatenating command signals as extra input channels, but rejected that because it gives commands no structural priority and the model could learn to ignore them. I also considered baking command context directly into each encoder, but rejected that too because it would couple the encoders more tightly to command logic and make the architecture less modular. Instead I kept the encoders focused purely on sensor data and handled command context in the fusion layer through cross-attention to a short command history sequence.
 
 ## Output and Visualization
 
@@ -30,7 +30,7 @@ One thing I want to be careful about is calibration. The health score should be 
 These are the constraints I want to hold regardless of how the design evolves:
 
 - The orchestrator needs to actually catch coupled, sub-threshold faults that conventional per-channel redlines would miss on the same data. That is the baseline comparison I need to demonstrate.
-- Training, calibration, and fault-injection data have to be generated separately and kept disjoint. The model should only see commands and telemetry at inference time.
+- Training, validation, calibration, and test data have to be generated separately and kept disjoint, and the test split is touched only once. The model should only see commands and telemetry at inference time.
 - Attention weights indicate which channels were relevant, not what caused the fault. I want to be honest about that distinction in how the output is presented.
 - The system advises, it does not act. Deterministic redline protection keeps all authority.
 
