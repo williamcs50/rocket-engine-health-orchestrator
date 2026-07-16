@@ -1,7 +1,7 @@
 # Rocket Engine Health Orchestrator: Design Rationale
 
 **Author:** William Opyrchal  
-**Date:** July 14, 2026
+**Date:** July 16, 2026
 
 ## Summary
 
@@ -9,7 +9,7 @@ This document lays out the architecture I came up with for a Rocket Engine Healt
 
 The main priority was keeping the architecture modular and easy to iterate on. I am starting with uniform encoders across all channels and only adding complexity when data shows it is necessary.
 
-One open question I want to test early is whether cross-attention over a command sequence is good enough to capture command-to-response dynamics, or whether a small recurrent model would do better. That is the first experiment I want to run once the pipeline is working end to end.
+The first thing I need to prove once the pipeline is running end to end is that cross-attention over a command sequence is sufficient to capture command-to-response dynamics — or whether a small recurrent model would do better.
 
 ## How I Got Here
 
@@ -48,7 +48,7 @@ Where I diverged: I chose to start with uniform encoders rather than building in
 
 The two decisions I feel most confident about are starting with uniform encoders and handling command context in the fusion layer rather than inside each encoder. Both keep the system simpler and more modular early on, and I can add complexity later if I need to.
 
-The main open question is whether cross-attention over a command sequence is actually good enough to learn command-to-response dynamics, or whether a small recurrent model would do better. That is the first experiment I want to run once the full pipeline is working end to end.
+The first thing I need to prove once the full pipeline is running is that cross-attention over a command sequence is sufficient to learn command-to-response dynamics — or whether a small recurrent model would do better.
 
 ## Why This Document
 
