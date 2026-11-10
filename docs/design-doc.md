@@ -25,7 +25,7 @@ I want the output to actually be useful, not just technically correct. A health 
 
 One thing I want to be careful about is calibration. The health score should be well-calibrated so a reported confidence level actually matches reality. The way I am thinking about it: a score of 0.85 should mean the current engine state is more unusual than 85% of normal examples the model has seen under similar commanded conditions. Most neural networks are overconfident by default, so I plan to apply post-hoc calibration (likely temperature scaling) after training. This matters because an overconfident false negative is especially dangerous here. I would rather the model surface uncertainty than hide it.
 
-## The Four Floor Commitments
+## The Five Floor Commitments
 
 These are the constraints I want to hold regardless of how the design evolves:
 
@@ -33,6 +33,7 @@ These are the constraints I want to hold regardless of how the design evolves:
 - Training, validation, calibration, and test data have to be generated separately and kept disjoint, and the test split is touched only once. The model should only see commands and telemetry at inference time.
 - Attention weights indicate which channels were relevant, not what caused the fault. I want to be honest about that distinction in how the output is presented.
 - The system advises, it does not act. Deterministic redline protection keeps all authority.
+- The verdict must be legible. An engineer under time pressure should be able to read the flag, the confidence, and the ranked list of implicated channels, and trace them back to the physical engine, without digging through raw weights.
 
 ## Comparison with the Napkin
 
