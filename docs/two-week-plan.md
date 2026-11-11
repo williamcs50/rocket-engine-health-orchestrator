@@ -68,7 +68,7 @@ The throttle command is the only input shared by the engine and the model; the i
 
 | Contract | Value | Used by |
 | --- | --- | --- |
-| Channels, fixed order | chamber pressure, turbopump speed, turbopump vibration, bearing temp, nozzle/coolant temp, coolant flow, feed-line pressure, mixture ratio | generator, encoders, fusion, demo |
+| Channels, fixed order | `chamber_pressure`, `turbopump_speed`, `turbopump_vibration`, `bearing_temp`, `nozzle_temp`, `coolant_flow`, `feed_pressure`, `mixture_ratio` | generator, encoders, fusion, demo |
 | Command | throttle only | generator, cross-attention |
 | Run shape | 60 s at 10 ms = 6,000 steps; 1 command + 8 sensors | generator, data loaders |
 | Window | 100 samples | encoders |

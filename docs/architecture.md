@@ -28,7 +28,8 @@ generator/      physics model, fault injection, dataset splits
 model/          encoder, fusion block, training
 evaluation/     redline and persistence baselines, metrics harness
 tests/          contract tests and per-phase exit tests
-docs/           design rationale, architecture, two-week plan
+runs/           one folder per run: config and metrics committed, everything else ignored
+docs/           design rationale, architecture, two-week plan, build log
 ```
 
 ## Frozen contracts
@@ -48,6 +49,19 @@ Values live in `contracts.py`. Changing one requires a decision-log entry below.
 | Fusion | — | 1 to 2 transformer blocks, 4 heads, feed-forward 16 → 64 → 16 |
 | Training objective | — | Forecast all 8 channels 10 to 20 samples ahead (horizon tuned on validation) |
 | Output | `Verdict` | `flag`, `confidence` (0 to 1), `ranked_channels`; validated on creation, round-trips through JSON |
+
+Channel code names map to the names used in the two-week plan and the design docs:
+
+| Index | Code name | Plan name |
+| --- | --- | --- |
+| 0 | `chamber_pressure` | chamber pressure |
+| 1 | `turbopump_speed` | turbopump speed |
+| 2 | `turbopump_vibration` | turbopump vibration |
+| 3 | `bearing_temp` | bearing temp |
+| 4 | `nozzle_temp` | nozzle/coolant temp |
+| 5 | `coolant_flow` | coolant flow |
+| 6 | `feed_pressure` | feed-line pressure |
+| 7 | `mixture_ratio` | mixture ratio |
 
 ## Data discipline
 
@@ -76,3 +90,5 @@ Coming once the model exists (Nov 16).
 | 2026-11-10 | Throttle is the only command | Per the book; mixture ratio is a sensor |
 | 2026-11-10 | Training objective: forecasting, 10 to 20 samples ahead | Forces the model to read the throttle, which prevents false alarms on commanded changes; one step ahead can be passed by copying the last value |
 | 2026-11-10 | Encoders share weights, with a channel-ID embedding and per-channel normalization | The case study's "same uniform encoder" with channel tags; the design rationale's "start uniform." Each channel still maps to one token, so attention stays per-sensor |
+| 2026-11-10 | Channel code names shortened: `nozzle_temp`, `feed_pressure` | Shorter identifiers for the plan's "nozzle/coolant temp" and "feed-line pressure"; same physical channels, mapped in the table above |
+| 2026-11-10 | In `runs/`, commit each run's `config.*` (including the seed) and `metrics.*`; ignore checkpoints, generated data and plots | Config, seed and metrics are small and are what a reviewer needs to reproduce and check a number; everything else is large and regenerable from them |
