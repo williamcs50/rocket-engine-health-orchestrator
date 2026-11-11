@@ -48,6 +48,7 @@ Values live in `contracts.py`. Changing one requires a decision-log entry below.
 | Encoder weights | — | Shared across all 8 channels, plus a learned channel-ID embedding; each channel normalized with train-split statistics |
 | Fusion | — | 1 to 2 transformer blocks, 4 heads, feed-forward 16 → 64 → 16 |
 | Training objective | — | Forecast all 8 channels 10 to 20 samples ahead (horizon tuned on validation) |
+| Run layout | `Run` | `throttle` (6000,) and `sensors` (6000, 8) in `CHANNELS` order, time first, kept separate; plus `seed`. Shapes validated on creation |
 | Output | `Verdict` | `flag`, `confidence` (0 to 1), `ranked_channels`; validated on creation, round-trips through JSON |
 
 Channel code names map to the names used in the two-week plan and the design docs:
@@ -74,7 +75,7 @@ The reasoning is in floor commitment 2 of the [design rationale](design-doc.md).
 
 ## Seams
 
-- **Generator ↔ real telemetry:** both produce runs of the same shape (1 command + 8 sensors × 6000 steps), so either can feed the model.
+- **Generator ↔ real telemetry:** both produce a `Run` of the same shape (throttle `(6000,)` + sensors `(6000, 8)`), so either can feed the model.
 - **Encoders are swappable:** anything that turns a channel's 100-sample window into 16 numbers fits. Each channel maps to an encoder; today all eight point to the same shared one, and the vibration channel is the first candidate for its own.
 
 ## Pipeline details
@@ -92,3 +93,6 @@ Coming once the model exists (Nov 16).
 | 2026-11-10 | Encoders share weights, with a channel-ID embedding and per-channel normalization | The case study's "same uniform encoder" with channel tags; the design rationale's "start uniform." Each channel still maps to one token, so attention stays per-sensor |
 | 2026-11-10 | Channel code names shortened: `nozzle_temp`, `feed_pressure` | Shorter identifiers for the plan's "nozzle/coolant temp" and "feed-line pressure"; same physical channels, mapped in the table above |
 | 2026-11-10 | In `runs/`, commit each run's `config.*` (including the seed) and `metrics.*`; ignore checkpoints, generated data and plots | Config, seed and metrics are small and are what a reviewer needs to reproduce and check a number; everything else is large and regenerable from them |
+| 2026-11-11 | Redlines are set from the physics (hardware limits) before looking at any runs, one upper limit per channel | Real redlines come from what the hardware survives, not observed data, so the nominal-run redline test checks the physics instead of passing by construction. When a fault must be sub-threshold, tune the fault's size, never the redlines |
+| 2026-11-11 | `simulate(noise=False)` turns off only sensor noise; the seed still sets run-to-run parameter variation and offsets | Step and lag tests run against clean physics while every run stays a distinct, seeded engine |
+| 2026-11-11 | A run stores throttle and sensors as separate arrays: `throttle` (6000,) and `sensors` (6000, 8) in `CHANNELS` order, time first | No column offset, so `sensors[:, i]` is always `CHANNELS[i]`; matches the design, where throttle enters through cross-attention rather than as a ninth channel; leaves room for Thursday's fault label |
