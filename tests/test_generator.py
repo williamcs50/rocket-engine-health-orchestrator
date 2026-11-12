@@ -47,10 +47,10 @@ def test_different_seeds_differ() -> None:
     assert not np.array_equal(a.sensors, b.sensors)        # same command, different engine
     assert not np.array_equal(make_throttle(seed=1), make_throttle(seed=2))  # duty cycle varies too
 
-def test_throttle_up_raises_pressure_and_speed() -> None:
+def test_throttle_up_raises_pressure_speed_and_nozzle_temp() -> None:
     run = simulate(step_throttle(), seed=0, noise=False)
     before, settled = sec(30.0) - 1, sec(40.0)
-    for name in ("chamber_pressure", "turbopump_speed"):
+    for name in ("chamber_pressure", "turbopump_speed", "nozzle_temp"):
         assert col(run, name)[settled] > col(run, name)[before], f"{name} did not rise"
 
 @pytest.mark.parametrize("seed", SEEDS)
@@ -86,3 +86,4 @@ def test_nominal_run_stays_under_redlines(seed: int) -> None:
     for name, limit in REDLINES.items():
         peak = col(run, name).max()
         assert peak < limit, f"{name} peaked at {peak:.3g}, redline {limit:.3g}"
+  
