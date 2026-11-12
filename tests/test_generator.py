@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from contracts import CHANNELS, N_STEPS, DT_S, Run
-from generator.engine import REDLINES, make_throttle, simulate
+from generator.engine import LEVEL_MAX, REDLINES, make_throttle, simulate
 
 SEEDS = range(5)
 
@@ -20,6 +20,13 @@ def step_throttle(before: float = 0.6, after: float = 0.9, at: float = 30.0) -> 
     thr[sec(at):] = after
     return thr
 
+@pytest.mark.parametrize("seed", SEEDS)
+def test_throttle_profile_is_valid(seed: int) -> None:
+    thr = make_throttle(seed)
+    assert thr.shape == (N_STEPS,)
+    assert thr[0] == 0.0 and thr[-1] == 0.0
+    assert thr.min() >= 0.0 and thr.max() <= LEVEL_MAX
+
 def test_run_has_contract_shape() -> None:
     thr = make_throttle(seed=0)
     run = simulate(thr, seed=0)
@@ -36,8 +43,8 @@ def test_same_seed_reproduces_run() -> None:
 
 def test_different_seeds_differ() -> None:
     thr = make_throttle(seed=1)
-    a, b = simulate(thr, seed=1), simulate(thr, seed=2)
-    assert not np.array_equal(a.sensors, b.sensors)        # same command, different run
+    a, b = simulate(thr, seed=1, noise=False), simulate(thr, seed=2, noise=False)
+    assert not np.array_equal(a.sensors, b.sensors)        # same command, different engine
     assert not np.array_equal(make_throttle(seed=1), make_throttle(seed=2))  # duty cycle varies too
 
 def test_throttle_up_raises_pressure_and_speed() -> None:
