@@ -37,7 +37,7 @@ assert SHUTDOWN_WINDOW[1] + RAMP_DOWN[1] < RUN_S, "shutdown can't finish before 
 
 ONSET_WINDOW = (10.0, 30.0)  # s, when bearing wear can start
 SUB_THRESHOLD_S = 15.0  # s after onset during which redlines must stay quiet
-RATE_RANGE = (0.03, 0.06)  # increase in mu per second, relative to healthy
+RATE_RANGE = (0.04, 0.06)  # increase in mu per second, relative to healthy
 WEAR_CHANNELS = ("bearing_temp", "turbopump_vibration", "turbopump_speed")
 
 assert ONSET_WINDOW[1] + SUB_THRESHOLD_S < SHUTDOWN_WINDOW[0], "fault window runs into shutdown"
