@@ -2,11 +2,11 @@
 
 import numpy as np
 
-from contracts import CHANNELS, DT_S, N_STEPS, RUN_S, Run
+from contracts import CHANNELS, DT_S, N_STEPS, RUN_S, FaultLabel, Run
 
 # rng stream ids. Start at 1: [seed, 0] is the same stream as a plain seed.
-# Never renumber once datasets exist. Add new streams at the end (FAULT_STREAM = 4).
-THROTTLE_STREAM, ENGINE_STREAM, NOISE_STREAM = 1, 2, 3
+# Never renumber once datasets exist. Add new streams at the end.
+THROTTLE_STREAM, ENGINE_STREAM, NOISE_STREAM, FAULT_STREAM = 1, 2, 3, 4
 
 # Upper limit per channel. Set from the physics before looking at any runs.
 REDLINES: dict[str, float] = {
@@ -34,6 +34,13 @@ assert RAMP_UP[1] < STEP_WINDOW[0], "steps could start during the startup ramp"
 assert STEP_WINDOW[1] - STEP_WINDOW[0] >= STEP_GAP, "window can't fit two steps"
 assert STEP_WINDOW[1] + SLEW < SHUTDOWN_WINDOW[0], "last step overlaps shutdown"
 assert SHUTDOWN_WINDOW[1] + RAMP_DOWN[1] < RUN_S, "shutdown can't finish before the run ends"
+
+ONSET_WINDOW = (10.0, 30.0)  # s, when bearing wear can start
+SUB_THRESHOLD_S = 15.0  # s after onset during which redlines must stay quiet
+RATE_RANGE = (0.03, 0.06)  # increase in mu per second, relative to healthy
+WEAR_CHANNELS = ("bearing_temp", "turbopump_vibration", "turbopump_speed")
+
+assert ONSET_WINDOW[1] + SUB_THRESHOLD_S < SHUTDOWN_WINDOW[0], "fault window runs into shutdown"
 
 NOMINAL = {
     "n_max": 30000.0,       # rpm at full throttle
@@ -96,6 +103,20 @@ def make_throttle(seed: int) -> np.ndarray:
     return np.interp(t, knot_t, knot_v)
 
 
+def make_fault(seed: int) -> FaultLabel:
+    """Bearing wear: friction rises linearly from a random onset at a random rate."""
+    rng = np.random.default_rng([seed, FAULT_STREAM])
+    onset_s = rng.uniform(*ONSET_WINDOW) # draw order is part of the contract:
+    rate = rng.uniform(*RATE_RANGE) # onset first, then rate; never reorder
+
+    return FaultLabel(
+        kind="bearing_wear",
+        onset_s=float(onset_s),
+        rate=float(rate),
+        channels=WEAR_CHANNELS,
+    )
+
+
 def _algebraic(
     n: float | np.ndarray, wear: float | np.ndarray, p: dict[str, float]
 ) -> tuple[float | np.ndarray, ...]:
@@ -107,7 +128,7 @@ def _algebraic(
     return feed, flow, chamber, vibration
 
 
-def simulate(throttle: np.ndarray, seed: int, noise: bool = True) -> Run:
+def simulate(throttle: np.ndarray, seed: int, noise: bool = True, fault: FaultLabel | None = None) -> Run:
     """Integrate the engine model with explicit Euler. noise=False turns off only sensor noise."""
     engine_rng = np.random.default_rng([seed, ENGINE_STREAM])
     noise_rng = np.random.default_rng([seed, NOISE_STREAM])
@@ -118,6 +139,9 @@ def simulate(throttle: np.ndarray, seed: int, noise: bool = True) -> Run:
     p["C_bearing"] = p["tau_bearing"] * p["h_bearing"]
 
     mu = np.full(N_STEPS, p["mu"])
+    if fault is not None:
+        t = np.arange(N_STEPS) * DT_S
+        mu = p["mu"] * (1 + fault.rate * np.maximum(0.0, t - fault.onset_s))
     wear = mu / p["mu"] - 1.0  # 0 when healthy, 1.0 when friction has doubled
 
     speed, bearing, nozzle = (np.empty(N_STEPS) for _ in range(3))
@@ -165,4 +189,4 @@ def simulate(throttle: np.ndarray, seed: int, noise: bool = True) -> Run:
             outputs[name] = outputs[name] + noise_rng.normal(0, sigma, N_STEPS)
 
     sensors = np.column_stack([outputs[name] for name in CHANNELS])
-    return Run(throttle=throttle, sensors=sensors, seed=seed)
+    return Run(throttle=throttle, sensors=sensors, seed=seed, fault=fault)
