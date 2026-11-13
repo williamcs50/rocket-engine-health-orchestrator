@@ -6,3 +6,4 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = ["slow: runs whole splits (about a minute). Skip with -m 'not slow'"]
