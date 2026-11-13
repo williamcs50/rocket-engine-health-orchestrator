@@ -57,7 +57,7 @@ class FaultLabel:
 
 @dataclass(frozen=True, eq=False)  # eq=False: == on arrays is elementwise, so compare fields explicitly
 class Run:
-    """One engine run. sensors[:, i] is CHANNELS[i]; throttle is kept separate."""
+    """One engine run. sensors[:, i] is CHANNELS[i]. Throttle is kept separate."""
 
     throttle: np.ndarray  # (N_STEPS,)
     sensors: np.ndarray  # (N_STEPS, len(CHANNELS))

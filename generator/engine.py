@@ -107,7 +107,7 @@ def make_fault(seed: int) -> FaultLabel:
     """Bearing wear: friction rises linearly from a random onset at a random rate."""
     rng = np.random.default_rng([seed, FAULT_STREAM])
     onset_s = rng.uniform(*ONSET_WINDOW) # draw order is part of the contract:
-    rate = rng.uniform(*RATE_RANGE) # onset first, then rate; never reorder
+    rate = rng.uniform(*RATE_RANGE) # onset first, then rate. Never reorder
 
     return FaultLabel(
         kind="bearing_wear",
