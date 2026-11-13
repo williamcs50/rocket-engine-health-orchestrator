@@ -23,7 +23,7 @@ The generator produces telemetry from a throttle command. Each channel's window 
 ## Repo layout
 
 ```
-contracts.py    frozen constants and the Verdict type (single source of truth)
+contracts.py    frozen constants and the Run, FaultLabel and Verdict types (single source of truth)
 generator/      physics model, fault injection, dataset splits
 model/          encoder, fusion block, training
 evaluation/     redline and persistence baselines, metrics harness
@@ -45,12 +45,12 @@ Values live in `contracts.py`. Changing one requires a decision-log entry below.
 | Steps per run | `N_STEPS` | 6000 |
 | Encoder window | `WINDOW` | 100 samples (1 s) |
 | Embedding size | `D_EMBED` | 16 numbers per channel, so (batch, 8, 16) |
-| Encoder weights | — | Shared across all 8 channels, plus a learned channel-ID embedding; each channel normalized with train-split statistics |
+| Encoder weights | — | Shared across all 8 channels, plus a learned channel-ID embedding. Each channel normalized with train-split statistics |
 | Fusion | — | 1 to 2 transformer blocks, 4 heads, feed-forward 16 → 64 → 16 |
 | Training objective | — | Forecast all 8 channels 10 to 20 samples ahead (horizon tuned on validation) |
-| Run layout | `Run` | `throttle` (6000,) and `sensors` (6000, 8) in `CHANNELS` order, time first, kept separate; plus `seed` and `fault` (a `FaultLabel`, or None when healthy). Shapes validated on creation |
-| Fault ground truth | `FaultLabel` | `kind` (`bearing_wear` only), `onset_s` (0 to 60 s), `rate` (positive), `channels` (at least one, all in `CHANNELS`); validated on creation. Read by evaluation only, never by the model |
-| Output | `Verdict` | `flag`, `confidence` (0 to 1), `ranked_channels`; validated on creation, round-trips through JSON |
+| Run layout | `Run` | `throttle` (6000,) and `sensors` (6000, 8) in `CHANNELS` order, time first, kept separate. Plus `seed` and `fault` (a `FaultLabel`, or None when healthy). Shapes validated on creation. Arrays are copied and read-only |
+| Fault ground truth | `FaultLabel` | `kind` (`bearing_wear` only), `onset_s` (0 to 60 s), `rate` (positive), `channels` (at least one, all in `CHANNELS`). Validated on creation. Read by evaluation only, never by the model |
+| Output | `Verdict` | `flag`, `confidence` (0 to 1), `ranked_channels`. Validated on creation, round-trips through JSON |
 
 Channel code names map to the names used in the two-week plan and the design docs:
 
@@ -68,8 +68,9 @@ Channel code names map to the names used in the two-week plan and the design doc
 ## Data discipline
 
 - Four disjoint splits (train, validation, calibrate, test) from separate seed ranges.
+- Train holds healthy runs only. Validation, calibrate and test mix healthy and faulted runs.
 - The test split is opened once.
-- The model sees telemetry and the throttle command only; the injected fault never reaches it.
+- The model sees telemetry and the throttle command only. The injected fault never reaches it.
 - Normalization statistics come from the train split only.
 
 The reasoning is in floor commitment 2 of the [design rationale](design-doc.md).
@@ -77,7 +78,7 @@ The reasoning is in floor commitment 2 of the [design rationale](design-doc.md).
 ## Seams
 
 - **Generator ↔ real telemetry:** both produce a `Run` of the same shape (throttle `(6000,)` + sensors `(6000, 8)`), so either can feed the model.
-- **Encoders are swappable:** anything that turns a channel's 100-sample window into 16 numbers fits. Each channel maps to an encoder; today all eight point to the same shared one, and the vibration channel is the first candidate for its own.
+- **Encoders are swappable:** anything that turns a channel's 100-sample window into 16 numbers fits. Each channel maps to an encoder. Today all eight point to the same shared one, and the vibration channel is the first candidate for its own.
 
 ## Pipeline details
 
@@ -94,7 +95,7 @@ Coming once the model exists (Nov 16).
 | 2026-11-10 | Channel code names `nozzle_temp` and `feed_pressure` | Shorter names for the plan's "nozzle/coolant temp" and "feed-line pressure", mapped in the table above |
 | 2026-11-10 | In `runs/`, commit each run's `config.*` (with seed) and `metrics.*`, ignore the rest | Small files a reviewer needs to reproduce a number. Everything else is large and regenerable |
 | 2026-11-11 | Redlines come from the physics, set before looking at any runs, one upper limit per channel | Real redlines come from what the hardware survives. When a fault must stay sub-threshold, tune the fault, never the redlines |
-| 2026-11-11 | Each kind of randomness gets its own stream, `default_rng([seed, id])`: throttle 1, engine 2, noise 3 (fault 4 on D3). Never renumber | Plain `default_rng(seed)` in two places gives identical numbers. Ids start at 1 because `[seed, 0]` equals a plain seed |
+| 2026-11-11 | Each kind of randomness gets its own stream, `default_rng([seed, id])`: throttle 1, engine 2, noise 3, fault 4. Never renumber | Plain `default_rng(seed)` in two places gives identical numbers. Ids start at 1 because `[seed, 0]` equals a plain seed |
 | 2026-11-11 | `simulate(noise=False)` turns off only sensor noise | Step and lag tests run on clean physics while every seed stays a distinct engine |
 | 2026-11-11 | `Run` stores `throttle` (6000,) and `sensors` (6000, 8) as separate arrays | `sensors[:, i]` is always `CHANNELS[i]`, and throttle enters the model through cross-attention, not as a ninth channel |
 | 2026-11-12 | Redlines 20% above each channel's rated full-throttle value (temperatures in K), upper limits only | A plausible design margin. Healthy headroom over 200 seeds is 8% or more (vibration is tightest), leaving room for a sub-threshold fault |
@@ -103,4 +104,9 @@ Coming once the model exists (Nov 16).
 | 2026-11-12 | Engine model: feed ∝ speed², flow = c_flow · √feed, chamber pressure ∝ flow. Bearing and nozzle are heat balances. Nozzle cooling ∝ flow^0.8 plus a 30 s loss to ambient. Mixture ratio constant | Pc follows the pump so pump faults reach it. Linear cooling would cancel the heat input and leave the nozzle flat across throttle. The ambient loss lets the nozzle cool after shutdown (full throttle settles near 750 K, not 790 K). One pump can't imbalance the flows. Limitation: speed, Pc and flow stay exact multiples in healthy runs |
 | 2026-11-12 | Bearing wear = mu / healthy mu − 1 acts on bearing heat, speed (× (1 − 0.02 · wear)) and vibration (× (1 + 0.2 · wear)) | Without it, bearing wear moved one channel. At 1.5 times healthy friction it moves seven: speed, Pc and flow −1%, feed −2%, vibration +8%, bearing +18 K, nozzle −1 K. Constants are tuned with onset rate on D3 |
 | 2026-11-12 | `Run` gains `fault: FaultLabel \| None = None`. `FaultLabel` holds kind, onset, rate and the channels the fault acts on directly (bearing temp, vibration, speed). Onset bounds are inclusive, 0 to `RUN_S` | The generator writes the label and evaluation reads it, so it is a contract. Defaulting to None keeps every existing healthy `Run` valid. Downstream channels (feed, flow, chamber pressure) move only because speed moves, so they are left out of the ground truth. This choice shapes the Nov 20 attribution check |
-| 2026-11-12 | Bearing-wear exit criteria: onset drawn from 10 to 30 s, at least 80% of fault runs cross no redline before onset + 15 s, and by then bearing temp and vibration sit more than 5 noise sigmas above the healthy twin | Two tests pull in opposite directions and fence the fault into a band: small enough that redlines miss it, big enough that a model has something to see. A do-nothing fault would pass the redline test alone |
+| 2026-11-12 | Bearing-wear exit criteria: onset drawn from 10 to 30 s, at least 80% of fault runs cross no redline before onset + 15 s, and by then bearing temp and vibration sit visibly above the healthy twin (floors in the next entry) | Two tests pull in opposite directions and fence the fault into a band: small enough that redlines miss it, big enough that a model has something to see. A do-nothing fault would pass the redline test alone |
+| 2026-11-12 | Fault visibility floors per channel: bearing temp 5 sigma, vibration 2 sigma per sample | The vibration redline margin (about 0.14 g above a peak healthy run) is under 5 sigma, so a 5 sigma vibration shift at full throttle would cross the redline. That matches the thesis: supporting channels are subtle alone. Window averaging makes a sustained 2 sigma shift easily detectable |
+| 2026-11-12 | Split seed ranges: train 0 to 1,999 (2,000 runs), val 100,000 to 100,399 (400), calibrate 200,000 to 200,299 (300), test 300,000 to 300,399 (400). Train is all healthy. In val, calibrate and test, odd seeds carry bearing wear and even seeds are healthy. Never move a range once datasets exist | Disjoint ranges make overlap impossible by construction, and the 100,000-seed gaps let any split grow without reaching its neighbor. Train stays healthy because the model learns normal behavior only. Alternating seeds give a 50/50 mix in every slice of a split. `fault_for` decides without simulating, so the split tests check every seed in milliseconds |
+| 2026-11-12 | Bearing-wear rate drawn from 0.04 to 0.06 per second (`RATE_RANGE`), up from 0.03 | At 0.03, 2 of 50 seeds left vibration just under its 2 sigma floor. Across every faulted run in val, calibrate and test, both floors now hold, and at least 99% stay under every redline until onset + 15 s |
+| 2026-11-12 | Calibrate holds faulted runs as well as healthy ones | Keeps both calibration methods open: temperature scaling needs labeled faults, and the empirical-quantile fallback can use the healthy half alone |
+| 2026-11-12 | Every contract violation raises `ValueError`. `Run` copies its arrays and marks them read-only. Checks are written so NaN fails them | One error type keeps the tests uniform. `frozen=True` stops reassignment but not in-place edits, so an accidental `run.sensors -= mean` during normalization would silently corrupt a fixed run. Normalization must build new arrays instead |
