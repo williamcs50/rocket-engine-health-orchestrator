@@ -8,9 +8,9 @@ from generator.engine import make_fault, make_throttle, simulate
 # Never move a range once datasets exist.
 SPLITS: dict[str, range] = {
     "train":     range(0, 2_000),
-    "val":       range(100_000, 100_400),
-    "calibrate": range(200_000, 200_300),
-    "test":      range(300_000, 300_400),
+    "val":       range(100_000, 101_000),
+    "calibrate": range(200_000, 201_000),
+    "test":      range(300_000, 301_000),
 }
 
 # Sorted by start, checking each neighbor covers every pair because ranges are contiguous.

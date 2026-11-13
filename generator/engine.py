@@ -37,6 +37,8 @@ assert SHUTDOWN_WINDOW[1] + RAMP_DOWN[1] < RUN_S, "shutdown can't finish before 
 
 ONSET_WINDOW = (10.0, 30.0)  # s, when bearing wear can start
 SUB_THRESHOLD_S = 15.0  # s after onset during which redlines must stay quiet
+# Fault magnitudes (RATE_RANGE, K_VIB, K_LOAD) locked on 2026-11-13, before any model exists.
+# Change them only with a decision-log entry.
 RATE_RANGE = (0.04, 0.06)  # increase in mu per second, relative to healthy
 WEAR_CHANNELS = ("bearing_temp", "turbopump_vibration", "turbopump_speed")
 
@@ -58,8 +60,8 @@ NOMINAL = {
     "mu": 1.0,              # bearing friction, relative to a healthy bearing
 }
 VARIATION = 0.03
-K_VIB = 0.2  # vibration +20% when friction doubles
-K_LOAD = 0.02  # speed -2% when friction doubles
+K_VIB = 0.2  # vibration +20% when friction doubles (locked, see RATE_RANGE)
+K_LOAD = 0.02  # speed -2% when friction doubles (locked, see RATE_RANGE)
 OFFSET_MAX = 3.0  # calibration offsets up to this many noise sigmas
 NOZZLE_TAU_AMB = 30.0  # s, slow loss to ambient when coolant isn't flowing
 
@@ -106,8 +108,9 @@ def make_throttle(seed: int) -> np.ndarray:
 def make_fault(seed: int) -> FaultLabel:
     """Bearing wear: friction rises linearly from a random onset at a random rate."""
     rng = np.random.default_rng([seed, FAULT_STREAM])
-    onset_s = rng.uniform(*ONSET_WINDOW) # draw order is part of the contract:
-    rate = rng.uniform(*RATE_RANGE) # onset first, then rate. Never reorder
+    # Draw order is part of the contract. Onset first, then rate. Never reorder.
+    onset_s = rng.uniform(*ONSET_WINDOW)
+    rate = rng.uniform(*RATE_RANGE)
 
     return FaultLabel(
         kind="bearing_wear",

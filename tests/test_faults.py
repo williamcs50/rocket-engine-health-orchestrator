@@ -3,7 +3,7 @@ import pytest
 
 from contracts import CHANNELS, DT_S, FaultLabel, Run
 from generator.engine import (
-    ONSET_WINDOW, REDLINES, SENSOR_NOISE, SUB_THRESHOLD_S,
+    K_LOAD, K_VIB, ONSET_WINDOW, RATE_RANGE, REDLINES, SENSOR_NOISE, SUB_THRESHOLD_S,
     make_fault, make_throttle, simulate,
 )
 
@@ -84,3 +84,8 @@ def test_fault_seeds_reproduce() -> None:
         assert ONSET_WINDOW[0] <= fault.onset_s <= ONSET_WINDOW[1]
         assert fault.rate > 0
         assert fault.kind == "bearing_wear"
+
+def test_fault_magnitudes_are_locked() -> None:
+    # Locked 2026-11-13, before any model exists. Changing these needs a decision-log entry.
+    assert RATE_RANGE == (0.04, 0.06)
+    assert K_VIB == 0.2 and K_LOAD == 0.02
