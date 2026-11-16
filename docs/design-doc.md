@@ -11,7 +11,7 @@ The main priority was keeping the architecture modular and easy to iterate on. I
 
 The first thing I need to prove once the pipeline is running end to end is that cross-attention over a command sequence is sufficient to capture command-to-response dynamics — or whether a small recurrent model would do better.
 
-## How I Got Here
+## How I Arrived Here
 
 I started with the simplest possible case: one sensor channel. What does the model actually need to see? I decided it needed a short window of recent timesteps so it could learn normal patterns, trends, and rates of change on its own. That became the foundation for the per-channel encoders.
 

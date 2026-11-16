@@ -29,7 +29,7 @@ class ZScoreBaseline:
         total_sq = np.zeros(len(CHANNELS))
         for run in runs:  # one run at a time, so a generator keeps memory flat
             if run.fault is not None:
-                raise ValueError(f"fit on healthy runs only, got a fault in seed {run.seed}")
+                raise ValueError(f"fit on healthy runs only, but seed {run.seed} has a fault")
             n += len(run.sensors)
             total += run.sensors.sum(axis=0)
             total_sq += (run.sensors**2).sum(axis=0)
@@ -45,7 +45,7 @@ class ZScoreBaseline:
 def persistence_forecast(sensors: np.ndarray, horizon: int) -> np.ndarray:
     """Forecast each sample as the value `horizon` steps earlier. The first rows repeat row 0."""
     if horizon < 1:
-        raise ValueError(f"horizon must be at least 1, got {horizon}")
+        raise ValueError(f"horizon must be at least 1, not {horizon}")
     forecast = np.empty_like(sensors)
     forecast[horizon:] = sensors[:-horizon]
     forecast[:horizon] = sensors[0]
