@@ -2,6 +2,56 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D5 · Mon Nov 16, 2026 · P1 and P2 model
+
+**Exit test:** not run yet. `model/train.py` moved to D6, so the four slow exit tests (loss falls on nominal data, beats persistence per channel, fault residuals rise, end-to-end verdict) can't run until a model is trained.
+- Fast tests pass: 18 data, 18 model (encoder shape and sharing, channel IDs, masking, throttle argument, noise floor loss, unscored start).
+- Reproduce with `pytest -m "not slow" tests/test_data.py tests/test_model.py`.
+
+### Built
+- `model/data.py`: `Normalizer` (train stats and noise floors, rejects faulted runs, near-zero spread and empty input, read-only arrays) and `make_windows` (views, not copies, with stride and horizon guards)
+- `model/encoder.py`: one MLP shared by all 8 channels, (batch, 8, 100) to (batch, 8, 16)
+- `model/forecaster.py`: channel IDs, a learned missing vector for masking, transformer fusion (4 heads, feed-forward 16 to 64 to 16), a per-channel head, the noise floor loss, and `forecast_run` scoring each channel with only its own input masked, in chunks
+- `residual_scores` and a placeholder `to_verdict`
+- `evaluation/checks.py`: reproduces the z-score false-alarm check, peak timing, persistence error and noise floors
+- `tests/test_data.py` and `tests/test_model.py`: 36 fast tests, plus 4 slow exit tests that need `train.py`
+- A test that thresholds from `healthy_peaks` and false alarms from `score_run` flag the same runs
+- `healthy_peaks` takes optional seeds, so that test stays fast
+
+### Decided
+- 2% stays the primary operating point. The redline comparison is reported at the 1% secondary point, not 0%
+- Z-score baseline limitation logged: its threshold is set by startup. Fix before Nov 20
+- Forecast bar per channel: beat persistence on the 7 dynamic channels, close half the gap to the noise floor on speed, chamber pressure, coolant flow and feed pressure. Mixture ratio reported against its floor
+- Training loss divides each channel's error by its noise floor, so every channel counts equally
+- Each window sees telemetry up to its end and the throttle up to the target time
+- Channel masking: a masked channel's embedding becomes a learned missing vector, training masks each channel with probability 0.25 (never all), and scoring forecasts each channel with only its own input masked
+- The persistence bar uses unmasked forecasts. Masked forecasts are for fault scoring
+- Flat-channel check uses a relative tolerance of 1e-6, because rounding leaves flat channels a std near 1e-8
+
+### Expected vs actual
+| Expected | Actual | Why |
+| --- | --- | --- |
+| With channel masking, fault residuals rise above the healthy twin's in at least 80% of faulted runs (written before training) | | |
+| Without masking, fault residuals rise in fewer than 80% of faulted runs, because a forecaster reading a channel's own history continues slow drifts (written before training) | | |
+
+### Learned
+A forecaster that reads a channel's own recent history simply continues a slow drift, so its error barely moves when the bearing wears. Hiding each channel's own input forces the forecast to come from the other channels, and that's where a fault shows: one channel inconsistent with the rest.
+
+### Ledger
+- **Built by hand:** `model/encoder.py`, `model/data.py` (`fit`, `transform`, `make_windows`), `Forecaster` (`__init__` with the transformer fusion, `tokens`, `forward`), `floor_weighted_mse`
+- **Delegated, can explain:** none
+- **Delegated, not yet understood:** `forecast_run` (stacked masking), `residual_by_channel`, `residual_scores`, `to_verdict`, `evaluation/checks.py`, `tests/test_data.py`, `tests/test_model.py`, the threshold consistency test in `tests/test_harness.py`, the `Normalizer` fixes (read-only arrays, flat-channel tolerance) and the `make_windows` guards
+- **Moved:** none
+
+### Moved to tomorrow
+- `model/train.py` and the four slow D5 exit tests: moved to D6, before Gate 1
+- Walk through everything in "not yet understood", starting with `forecast_run`
+
+### Next
+Tue 9:00, before Gate 1:
+- Masked-residual bias check on bearing temp: compare (a) the spread of masked residuals across healthy val runs with (b) the rise the fault causes within 15 s of onset. If (a) is comparable to (b), switch `residual_scores` to the change in the masked residual over the previous 15 to 20 s, and log it. Training doesn't change
+- Then Gate 1: the model against the redline at the 2% budget on val, plus the redline comparison at the 1% point
+
 ## D4 · Fri Nov 13, 2026 · Baselines and eval harness
 
 **Exit test:** passed. The harness reports recall, detection delay and transient false alarms for both baselines on val.
