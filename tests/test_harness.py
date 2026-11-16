@@ -90,3 +90,14 @@ def test_exit_harness_reports_both_baselines_on_val() -> None:
 
     redline = reports["redline"]
     assert redline.recall < 0.5, f"redlines caught {redline.recall:.0%} of faults early: faults too obvious, retune"
+
+def test_threshold_and_false_alarm_counting_agree() -> None:
+    # Thresholds come from healthy_peaks and false alarms from score_run. They must flag the same runs,
+    # or thresholds set on calibrate and false alarms counted on val would measure different things.
+    seeds = list(SPLITS["calibrate"][:20:2])  # 10 healthy runs
+    peaks = healthy_peaks(redline_scores, "calibrate", seeds)
+    threshold = threshold_at_budget(peaks, 0.2)  # 2 of 10 above, so both outcomes are exercised
+    runs = [make_run("calibrate", seed) for seed in seeds]
+    flagged = [score_run(redline_scores(run), run.throttle, threshold, None).false_alarm for run in runs]
+    assert flagged == list(peaks > threshold)
+    assert sum(flagged) == 2

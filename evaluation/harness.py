@@ -80,10 +80,13 @@ class Report:
     events_per_run: float  # per healthy run
 
 
-def healthy_peaks(score_fn: Callable[[Run], np.ndarray], split: str) -> np.ndarray:
-    """Each healthy run's highest score in a split. Thresholds come from these."""
-    seeds = [seed for seed in SPLITS[split] if fault_for(split, seed) is None]
-    return np.array([score_fn(make_run(split, seed)).max() for seed in seeds])
+def healthy_peaks(
+    score_fn: Callable[[Run], np.ndarray], split: str, seeds: Sequence[int] | None = None
+) -> np.ndarray:
+    """Each healthy run's highest score. Thresholds come from these. Defaults to the whole split."""
+    seeds = SPLITS[split] if seeds is None else seeds
+    healthy = [seed for seed in seeds if fault_for(split, seed) is None]
+    return np.array([score_fn(make_run(split, seed)).max() for seed in healthy])
 
 
 def evaluate(detectors: dict[str, tuple[Callable[[Run], np.ndarray], float]], split: str) -> dict[str, Report]:
