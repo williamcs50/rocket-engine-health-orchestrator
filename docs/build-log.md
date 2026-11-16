@@ -2,6 +2,64 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D4 · Fri Nov 13, 2026 · Baselines and eval harness
+
+**Exit test:** passed. The harness reports recall, detection delay and transient false alarms for both baselines on val.
+- Redline: recall 0.0%, false alarms 0.0%.
+- Z-score at the 2% budget: recall 1.2%, mean delay 13.8 s, false alarms 0.6%.
+- The redline missed every coupled fault within the 15 s window.
+- 95 fast tests plus 1 slow test pass.
+- Reproduce with `pytest -s -m slow` (about 80 s). The numbers print from the exit test.
+
+### Built
+- `evaluation/budget.py`: the pre-registered rules in one place (budget, secondary points, catch window, transient window, threshold and report splits)
+- `evaluation/baselines.py`: redline baseline (fixed at 1.0), per-channel z-score fitted on train, persistence forecast
+- `evaluation/harness.py`: thresholds from healthy peaks, per-run scoring (false alarm, early alarm, transient, catch, delay, events), `evaluate()` over a whole split
+- `evaluation/plots.py`: a healthy run and a faulted run against redlines, with the healthy twin, onset and catch window
+- `tests/test_budget.py`, `tests/test_baselines.py`, `tests/test_harness.py`, including the D4 exit test marked `slow`
+- `slow` marker registered in `pyproject.toml`, matplotlib and its dependencies pinned in `requirements.txt`
+- Fault magnitudes pinned by a new test in `tests/test_faults.py`
+- D2 and D3 build log entries finished, architecture.md brought up to date, semicolons removed across the docs
+
+### Decided
+- Fault magnitudes locked: `RATE_RANGE` 0.04 to 0.06 per s, `K_VIB` 0.2, `K_LOAD` 0.02
+- Val, calibrate and test grow to 1,000 runs each (500 healthy, 500 faulted)
+- False-alarm budget: at most 2% of healthy runs, counted per run over the whole run. 1% and 5% pre-registered as secondary points
+- Thresholds set on calibrate's healthy runs, results reported on val, test opened once on D9
+- A catch is a first alarm within onset + 15 s. An alarm before onset disqualifies the catch but stays out of the 2% rate
+- Headline comparison: orchestrator against redline at the redline's own false-alarm rate
+- `TRANSIENT_S` = 5 s after any throttle change. Transient false alarms count toward the budget and are reported separately
+- Rejected a 5% budget: it invites "of course you catch more" against a redline at 0%
+
+### Expected vs actual
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Redline misses most coupled faults within 15 s of onset | Missed all 500 (recall 0.0%) | Matched. The faults were tuned on D3 to stay under every redline |
+| A per-channel z-score catches more than the redline | Caught 6 of 500 (1.2%) at 0.6% false alarms | Barely. It compares each channel to one mean for the whole run, so normal throttle changes, startup and shutdown included, already sit many sigma away. The threshold has to sit above all of that, far above the fault's shift. All of its false alarms were transient |
+| A 2% budget makes a fair comparison against the redline | It invites "of course you catch more" | The redline's false-alarm rate is 0%, so the headline comparison moved to the redline's own rate |
+| 150 healthy calibrate runs can set a 2% threshold | Only about 3 runs would set it | Grew val, calibrate and test to 1,000 runs before any evaluation |
+| A test skeleton with `pass` bodies would show as failing | All 6 baseline tests "passed" | A test with no assert always passes. Real bodies replaced them |
+| matplotlib is installed in `reho` | `ModuleNotFoundError` on the first plot run | It was only in base Python. Installed in `reho` and pinned in requirements.txt |
+
+### Learned
+- A false-alarm budget is only a fair comparison if both detectors run at the same rate.
+- A test with no assertion passes whether or not the code works.
+
+### Ledger
+- **Built by hand:** `evaluation/baselines.py`, `evaluation/harness.py` (scoring functions), `evaluation/plots.py`
+- **Delegated, can explain:** `evaluation/budget.py`, `evaluate()` and `healthy_peaks()`, `tests/test_harness.py`, `tests/test_baselines.py`, `tests/test_budget.py`
+- **Delegated, not yet understood:** none
+- **Moved:** none
+
+### Moved to tomorrow
+- the site build log update
+- the channel lag decision, before Monday's training
+
+### Next
+Sat 9:00:
+- Weekly review, including the channel lag decision and the site build log update
+- Write scaled dot-product attention by hand and check it matches `nn.MultiheadAttention` to 1e-5
+
 ## D3 · Thu Nov 12, 2026 · P0 faults and splits
 
 **Exit test:** passed. At least 80% of 50 fault runs stay under every redline for 15 s after onset, and split seeds never overlap: 76/76 tests in `reho`.
