@@ -2,11 +2,91 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D6 · Tue Nov 17, 2026 · P2 evaluate
+
+**Exit test (Gate 1):** failed. Recall clears its bar, but false alarms on val exceed the 3% cap for both aggregations.
+- Bar, pre-registered in architecture.md before any val evaluation: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above the D4 z score's 1.2%, and every seed's false alarm rate is at most 3%.
+
+| At the 2% budget | Mean | Max |
+| --- | --- | --- |
+| Recall, seeds 0, 1, 2 | 10.0%, 15.4%, 9.4% | 3.8%, 9.8%, 9.0% |
+| Mean recall over 3 seeds (bar 5%) | 11.6% ± 3.3%, passes | 7.5% ± 3.3%, passes |
+| Lowest seed (bar above 1.2%) | 9.4%, passes | 3.8%, passes |
+| False alarms, seeds 0, 1, 2 (bar at most 3%) | 3.4%, 3.4%, 2.8%, fails | 3.2%, 2.0%, 3.6%, fails |
+| Mean delay | 11.9 to 12.2 s | 11.7 to 12.7 s |
+
+- Baselines at the 2% budget: redline 0.0% recall, z score 1.2% recall at 0.6% false alarms. Unmasked comparison: 2.0% recall with mean, 4.2% with max.
+- Aggregation chosen: mean. Higher recall on every seed, and the same pass or fail on each condition.
+- Reproduce with `python -m evaluation.gate1` (about 22 minutes). Every number above is in the committed `runs/gate1/metrics.json`.
+
+### Built
+- `model/train.py`: training with separate random streams for batches, masks and the probe, `random_mask` (never hides all eight, rejects rates outside 0 to 1), a probe loss curve on one fixed batch from before the first step, `TrainResult` carrying every setting used, `save_run` and `load_run` (normalizer and architecture in a committed config.json, weights local only, refuses a mismatched architecture), and a command line entry
+- `Normalizer.to_dict` and `from_dict`, so the statistics live in each run's config
+- `model/forecaster.py`: one `aggregate` function shared by `residual_scores` and `to_verdict`, a mean or max switch, a `masked` switch on `to_verdict`, and a plain `bool` flag
+- `evaluation/gate1.py`: thresholds from calibrate's healthy runs, every detector on val at 2%, 1% and 5%, where healthy peaks happen, the bearing temp bias check, results saved to `runs/gate1/metrics.json`
+- `tests/test_train.py`: 13 fast tests (mask rate and never all, bad rates, settings recorded, run names, save and load round trip, architecture mismatch refused)
+- Trained 3 masked seeds and the unmasked comparison, 10,000 steps each, 43 to 49 s per model (`seconds` in each `runs/*/metrics.json`)
+- CI runs the fast tests only. 153 fast tests pass
+
+### Decided
+- CI runs `pytest -m "not slow"`. The slow exit tests run locally and their numbers go in this log
+- Training steps raised from 3,000 to 10,000, because at 3,000 feed pressure missed its half the gap target
+- Gate 1 bar pre-registered (above), replacing "beats the redline", which the redline's 0% recall made passable by one lucky catch
+- Aggregation: mean, chosen on val (11.6% against max's 7.5%). Its val recall is slightly optimistic, since it's the better of two
+- Gate 1 failed, so per the plan D7 goes to fixing and the GRU experiment is dropped. Which fix comes first is open, to settle before D7 starts
+- The training loss curve is measured on one fixed probe batch, starting before any training, so the exit test compares against the true starting loss
+- Masks, batches and the probe each get their own random stream, so the masked and unmasked runs train on the same windows
+
+### Training curves
+| Run | Probe loss at start | Probe loss at end |
+| --- | --- | --- |
+| masked, seed 0 | 1008 | 8.4 |
+| masked, seed 1 | 1199 | 9.0 |
+| masked, seed 2 | 2825 | 7.9 |
+| unmasked, seed 0 | 894 | 1.6 |
+
+The masked seeds end at 8.5 ± 0.5 (mean and sample std over 3 seeds), so training is stable across seeds. The unmasked model ends at 1.6, close to 1.0, the noise floor itself. The masked loss is a blend: hidden channels miss by much more, since a hidden channel's per-run level is invisible to the others, and visible ones by much less. Each seed draws its own probe batch, so the end values compare only roughly across seeds.
+
+Reproduce:
+- Retrain: `python -m model.train --seed 0` (and 1, 2), and `python -m model.train --mask-prob 0 --seed 0`. Each prints its start and end probe loss
+- Without retraining, from the committed `runs/*/metrics.json`:
+  `python -c "import json,glob; [print(p, round(m['losses'][0],1), round(m['losses'][-1],1)) for p in sorted(glob.glob('runs/h10_*/metrics.json')) for m in [json.load(open(p))]]"`
+
+### Expected vs actual
+| Expected | Actual | Why |
+| --- | --- | --- |
+| 3,000 steps clear the D5 forecast bar | Feed pressure missed its half the gap target. 10,000 steps pass (`pytest -m slow tests/test_model.py -s`) | Undertrained. The 3,000 step run used a draft of train.py that was never committed, so its exact numbers can't be reproduced and aren't recorded |
+| Per-run bias in the masked bearing temp residual is comparable to the fault's rise, so a differenced score is needed | Partly. Over 500 healthy val runs the level's std is 31.9 and its 5th to 95th percentile 4.9 to 105.2. The fault's rise is 117.5 on average, median 85.1. A 20 run quick check had suggested 10 times the spread, which didn't hold | The typical run is fine, but the 5% of healthy runs with the largest bias sit above the median fault's rise, so bias matters at the tail. The differenced score stays a candidate |
+| Gate 1 passes, but barely. I think the masked mean recall lands around 7% at the 2% budget, lower than the quick check's 17% because 500 healthy runs push the thresholds higher. Mean beats max, since max picks up the full size of every throttle spike (written before the full run's output) | Failed. Recall was higher than predicted, 11.6%, and mean did beat max. But false alarms reached 3.4% on two seeds, over the 3% cap | The prediction didn't consider whether thresholds carry from calibrate to val. They're set by rare transient spikes, a heavy tail (seed 2's threshold is 256 at 2% but 344 at 1%), so 500 runs pin the 2% point only roughly. All three seeds were calibrated on the same 500 healthy runs, which would make them overshoot together. A likely explanation, not a reason to pass |
+
+### Learned
+- Throttle transients appear to set the model's thresholds. All 10 sampled healthy calibrate peaks were within 5 s of a throttle change, mostly on fast channels (`python -m evaluation.gate1`, which samples 10 runs, so this is still a small sample). The model doesn't read the throttle until D7, so every commanded step surprises it. Mean thresholds are 202 to 256 at 2%, while a bearing fault's rise is divided by 8 in the mean, which fits catches arriving late, about 12 s into the 15 s window.
+- Masking pays off. Masked models catch 11.6% on average with mean, the unmasked model 2.0%.
+- A 20 run check can mislead. It suggested bias was a tenth of the fault's rise, and the full run showed bias matters at the tail.
+- A false alarm cap catches what a recall bar can't. Recall passed easily, and the thresholds still didn't carry from calibrate to val.
+- A guard inside a function only protects its callers if every path calls it. `random_mask` rejected NaN, but `train` only called it when `mask_prob > 0`, which NaN fails, so a NaN rate would have trained an unmasked model silently.
+
+### Ledger
+- **Built by hand:** `random_mask`, the core of `train` (random streams, normalizing and cutting runs, the training loop), and in `gate1.py`: `time_one_run`, `healthy_seeds`, `calibrate_thresholds` and the start of `main`
+- **Delegated, can explain:** _confirm: `forecast_run`, `residual_by_channel`, `residual_scores`, `to_verdict` (walked through today)_
+- **Delegated, not yet understood:** `save_run` and `load_run` (`weights_only`, the architecture check), the probe curve, `Normalizer.to_dict` and `from_dict`, `aggregate` and its tests, `tests/test_train.py`, and in `gate1.py`: `peak_times`, `evaluate_val`, `bias_check` and the printing and saving in `main`
+- **Moved:** none
+
+### Moved to tomorrow
+- Walk through everything in "not yet understood", starting with `load_run`
+- Fair z score fix, still due before Nov 20
+
+### Next
+Wed 9:00, D7 goes to fixing, per the Gate 1 bar, and the GRU experiment is dropped:
+- First, choose the fix with the tutor. Candidates: command awareness (cross attention to the throttle history, aimed at the transient peaks that set thresholds and overshoot on val) and the differenced residual (aimed at per-run bias at the tail)
+- Rerun `python -m evaluation.gate1` against the same bar. The bar doesn't move
+
 ## D5 · Mon Nov 16, 2026 · P1 and P2 model
 
-**Exit test:** not run yet. `model/train.py` moved to D6, so the four slow exit tests (loss falls on nominal data, beats persistence per channel, fault residuals rise, end-to-end verdict) can't run until a model is trained.
-- Fast tests pass: 18 data, 18 model (encoder shape and sharing, channel IDs, masking, throttle argument, noise floor loss, unscored start).
-- Reproduce with `pytest -m "not slow" tests/test_data.py tests/test_model.py`.
+**Exit test:** passed on D6, once `model/train.py` existed. All four slow exit tests pass at 10,000 training steps (loss falls on nominal data, beats persistence per channel, fault residuals rise, end-to-end verdict).
+- At 3,000 steps, feed pressure missed its half the gap target. That run used an uncommitted draft of train.py, so its numbers aren't recorded. At 10,000 steps every channel passes.
+- Per channel on 100 healthy val runs, normalized squared error, model against persistence: chamber pressure 0.0009 against 0.0024, speed 0.0006 against 0.0018, vibration 0.0051 against 0.0083, bearing temp 0.0066 against 0.0096, nozzle temp 0.0014 against 0.0023, coolant flow 0.0009 against 0.0024, feed pressure 0.0012 against 0.0021.
+- Reproduce with `pytest -m slow tests/test_model.py -s` (about 60 s).
 
 ### Built
 - `model/data.py`: `Normalizer` (train stats and noise floors, rejects faulted runs, near-zero spread and empty input, read-only arrays) and `make_windows` (views, not copies, with stride and horizon guards)
@@ -31,11 +111,18 @@ One entry per session, newest first. Full decision entries live in [architecture
 ### Expected vs actual
 | Expected | Actual | Why |
 | --- | --- | --- |
-| With channel masking, fault residuals rise above the healthy twin's in at least 80% of faulted runs (written before training) | | |
-| Without masking, fault residuals rise in fewer than 80% of faulted runs, because a forecaster reading a channel's own history continues slow drifts (written before training) | | |
+| With channel masking, fault residuals rise above the healthy twin's in at least 80% of faulted runs (written before training) | Matched. The exit test passed, so at least 16 of 20 rose | Masked forecasts come from the other channels, so a bearing wearing out shows as disagreement |
+| Without masking, fault residuals rise in fewer than 80% of faulted runs, because a forecaster reading a channel's own history continues slow drifts (written before training) | Not measured. The exit test ran on the masked model only | The unmasked comparison model exists now, so this can be checked |
 
 ### Learned
 A forecaster that reads a channel's own recent history simply continues a slow drift, so its error barely moves when the bearing wears. Hiding each channel's own input forces the forecast to come from the other channels, and that's where a fault shows: one channel inconsistent with the rest.
+
+### Weekly review (9:00 to 10:00, moved from Saturday)
+- Ledger check: done. Nothing left in "not yet understood", every move recorded
+- Reread the D1 to D4 build logs: _done or skipped_
+- Redo one hand-built piece from memory and compare with the real code: _which piece, and how close, or skipped_
+- Update the case study's status line: _done or skipped_
+- Anything skipped carries to Saturday's review
 
 ### Ledger
 - **Built by hand:** `model/encoder.py`, `model/data.py` (`fit`, `transform`, `make_windows`), `Forecaster` (`__init__` with the transformer fusion, `tokens`, `forward`), `floor_weighted_mse`

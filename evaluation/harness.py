@@ -97,11 +97,11 @@ def evaluate(detectors: dict[str, tuple[Callable[[Run], np.ndarray], float]], sp
         for name, (score_fn, threshold) in detectors.items():
             outcome = score_run(score_fn(run), run.throttle, threshold, run.fault)
             results[name].append((run.fault is None, outcome))
-    return {name: _report(rows) for name, rows in results.items()}
+    return {name: summarize(rows) for name, rows in results.items()}
 
 
-def _report(rows: list[tuple[bool, RunResult]]) -> Report:
-    """Summarize one detector's per-run results."""
+def summarize(rows: list[tuple[bool, RunResult]]) -> Report:
+    """Summarize one detector's per-run results. Each row is (run is healthy, its result)."""
     healthy = [r for is_healthy, r in rows if is_healthy]
     faulted = [r for is_healthy, r in rows if not is_healthy]
     delays = [r.delay_s for r in faulted if r.caught]
