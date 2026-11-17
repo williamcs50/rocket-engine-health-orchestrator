@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pytest
 
@@ -43,6 +45,14 @@ def test_normalizer_arrays_are_read_only() -> None:
     for arr in (norm.mean, norm.std, norm.floor):
         with pytest.raises(ValueError):
             arr[0] = 0.0
+
+def test_normalizer_survives_a_json_round_trip() -> None:
+    # A run's config.json stores the stats, so they must come back exactly
+    norm = Normalizer.fit(make_run("train", seed) for seed in SPLITS["train"][:2])
+    back = Normalizer.from_dict(json.loads(json.dumps(norm.to_dict())))
+    for name in ("mean", "std", "floor"):
+        np.testing.assert_array_equal(getattr(back, name), getattr(norm, name))
+    assert not back.floor.flags.writeable
 
 def test_transform_uses_the_fitted_stats() -> None:
     norm = Normalizer.fit([constant_run(1.0), constant_run(3.0)])

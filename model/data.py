@@ -61,6 +61,15 @@ class Normalizer:
 
         return cls(mean=mean, std=std, floor=noise**2 / std**2)
 
+    def to_dict(self) -> dict[str, list[float]]:
+        """Plain lists, so the stats can live in a run's config.json."""
+        return {"mean": self.mean.tolist(), "std": self.std.tolist(), "floor": self.floor.tolist()}
+
+    @classmethod
+    def from_dict(cls, stats: dict[str, list[float]]) -> "Normalizer":
+        # __post_init__ turns the lists back into locked arrays
+        return cls(mean=stats["mean"], std=stats["std"], floor=stats["floor"])
+
     def transform(self, sensors: np.ndarray) -> np.ndarray:
         # A new array, so read only Run arrays are never touched
         return (sensors - self.mean) / self.std
