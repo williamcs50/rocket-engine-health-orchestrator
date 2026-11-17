@@ -13,7 +13,7 @@ from generator.engine import make_throttle, simulate
 from generator.splits import SPLITS, fault_for, make_run
 from model.data import Normalizer
 from model.encoder import ChannelEncoder
-from model.forecaster import Forecaster, floor_weighted_mse, forecast_run, residual_scores, to_verdict
+from model.forecaster import Forecaster, aggregate, floor_weighted_mse, forecast_run, residual_scores, to_verdict
 
 # Type hints only. train.py is imported inside the slow fixture, so a half-written
 # train.py can't stop the fast tests from running
@@ -126,6 +126,27 @@ def test_scores_are_zero_before_the_first_full_window() -> None:
     assert scores.shape == (N_STEPS,)
     # Nothing to forecast from yet
     assert not scores[: WINDOW + HORIZON - 1].any()
+
+@pytest.mark.parametrize("how, expected", [("mean", [5.0, 0.0]), ("max", [9.0, 0.0])])
+def test_aggregate_combines_channels_and_zeroes_missing_rows(how: str, expected: list[float]) -> None:
+    r = np.array([[1.0, 9.0], [np.nan, np.nan]])
+    np.testing.assert_allclose(aggregate(r, how), expected)
+
+def test_aggregate_rejects_unknown_names() -> None:
+    with pytest.raises(ValueError):
+        aggregate(np.zeros((2, 2)), "median")
+
+@pytest.mark.parametrize("masked", [True, False])
+@pytest.mark.parametrize("how", ["mean", "max"])
+def test_verdict_and_scores_use_the_same_aggregate(masked: bool, how: str) -> None:
+    # The harness thresholds residual_scores and the verdict flags on its own, so they must agree on every run
+    model = Forecaster(horizon=HORIZON).eval()
+    normalizer = Normalizer.fit([constant_run(1.0), constant_run(3.0)])
+    run = make_run(REPORT_SPLIT, SPLITS[REPORT_SPLIT][0])
+    peak = residual_scores(model, normalizer, run, masked=masked, how=how).max()
+    # Just below and just above the run's peak
+    assert to_verdict(model, normalizer, run, threshold=peak * 0.99, masked=masked, how=how).flag is True
+    assert to_verdict(model, normalizer, run, threshold=peak * 1.01, masked=masked, how=how).flag is False
 
 # Slow exit tests: one trained model shared by all of them
 

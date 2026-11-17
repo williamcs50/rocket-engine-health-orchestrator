@@ -82,7 +82,7 @@ def test_stride_keeps_every_nth_window() -> None:
 
 def test_fit_accepts_real_train_runs() -> None:
     # The flat-channel check must not be so loose that it rejects real data. Mixture ratio is the
-    # flattest real channel, with a std about 0.5% of its level, still thousands of times above the 1e-6 tolerance
+    # flattest real channel, with a std about 2% of its level, still thousands of times above the 1e-6 tolerance
     norm = Normalizer.fit(make_run("train", seed) for seed in SPLITS["train"][:3])
     assert np.all(norm.std > 1e-3 * np.abs(norm.mean))
     assert np.all(np.isfinite(norm.floor))

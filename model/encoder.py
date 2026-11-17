@@ -3,7 +3,8 @@ from torch import nn
 
 from contracts import D_EMBED, WINDOW
 
-ENCODER_HIDDEN = 64  # hidden units between the 100-sample window and the 16-number embedding
+# hidden units between the 100-sample window and the 16-number embedding
+ENCODER_HIDDEN = 64  
 
 class ChannelEncoder(nn.Module):
     """(batch, channels, WINDOW) to (batch, channels, D_EMBED). One small MLP shared by every channel."""

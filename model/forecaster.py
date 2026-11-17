@@ -16,9 +16,13 @@ FFN_HIDDEN = 64
 N_BLOCKS = 1
 # Windows per batch. Bounds memory, especially when masking makes 8 copies of each
 CHUNK = 2048
+# How per-channel residuals combine into one score. Compared against "max" on val at Gate 1
+AGGREGATE = "mean"
 
 
 class Forecaster(nn.Module):
+    """Forecasts every channel `horizon` samples ahead from all channels' windows, with optional masking."""
+
     def __init__(self, horizon: int = HORIZON) -> None:
         super().__init__()
         self.horizon = horizon
@@ -30,7 +34,7 @@ class Forecaster(nn.Module):
         # Each channel's fused token -> its own forecast
         self.head = nn.Linear(D_EMBED, 1)
 
-    def tokens(self, windows, mask=None):
+    def tokens(self, windows: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """Encoder output, masked channels replaced by `missing`, plus channel IDs. (batch, 8, 16)."""
         # (batch, 8, 16)
         t = self.encoder(windows)
@@ -42,7 +46,9 @@ class Forecaster(nn.Module):
         # tag every token with its channel
         return t + self.channel_id
 
-    def forward(self, windows, throttle_hist=None, mask=None):
+    def forward(
+        self, windows: torch.Tensor, throttle_hist: torch.Tensor | None = None, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """(batch, 8, WINDOW) -> (batch, 8): each channel `horizon` samples ahead, normalized units.
         throttle_hist is accepted but unused until Wednesday's cross-attention."""
         # (batch, 8, 16), channels mixed
@@ -52,7 +58,7 @@ class Forecaster(nn.Module):
         return self.head(fused).squeeze(-1)
 
 
-def floor_weighted_mse(pred, target, floor):
+def floor_weighted_mse(pred: torch.Tensor, target: torch.Tensor, floor: torch.Tensor) -> torch.Tensor:
     """Each channel's squared error in multiples of its noise floor, averaged."""
     return ((pred - target) ** 2 / floor).mean()
 
@@ -87,26 +93,50 @@ def forecast_run(model: Forecaster, normalizer: Normalizer, run: Run, masked: bo
     out[WINDOW - 1 + model.horizon:] = np.concatenate(preds)
     return out
 
-def residual_by_channel(model, normalizer, run, masked=True) -> np.ndarray:
-    """(N_STEPS, 8): each channel's squared miss in noise-floor units; NaN where there's no forecast."""
+
+def residual_by_channel(model: Forecaster, normalizer: Normalizer, run: Run, masked: bool = True) -> np.ndarray:
+    """(N_STEPS, 8): each channel's squared miss in noise-floor units. NaN where there's no forecast."""
     x = normalizer.transform(run.sensors)
     forecast = forecast_run(model, normalizer, run, masked=masked)
     return (x - forecast) ** 2 / normalizer.floor
 
-def residual_scores(model, normalizer, run, masked=True) -> np.ndarray:
-    """Per-sample anomaly score, (N_STEPS,); 0 before the first forecast."""
-    r = residual_by_channel(model, normalizer, run, masked)
-    return np.nan_to_num(r.mean(axis=1), nan=0.0)
 
 
-def to_verdict(model, normalizer, run, threshold: float) -> Verdict:
+def aggregate(r: np.ndarray, how: str = AGGREGATE) -> np.ndarray:
+    """(N_STEPS, 8) floor-weighted residuals to (N_STEPS,) scores. 0 where there's no forecast."""
+    if how == "mean":
+        combined = r.mean(axis=1)
+    elif how == "max":
+        combined = r.max(axis=1)
+    else:
+        raise ValueError(f"unknown aggregate {how!r}")
+    return np.nan_to_num(combined, nan=0.0)
+
+
+def residual_scores(
+    model: Forecaster, normalizer: Normalizer, run: Run, masked: bool = True, how: str = AGGREGATE
+) -> np.ndarray:
+    """Per-sample anomaly score, (N_STEPS,). 0 before the first forecast."""
+    return aggregate(residual_by_channel(model, normalizer, run, masked), how)
+
+
+def to_verdict(
+    model: Forecaster,
+    normalizer: Normalizer,
+    run: Run,
+    threshold: float,
+    masked: bool = True,
+    how: str = AGGREGATE,
+) -> Verdict:
     """Flag, a placeholder confidence until calibration (D8), channels ranked by residual."""
-    r = residual_by_channel(model, normalizer, run)
-    scores = np.nan_to_num(r.mean(axis=1), nan=0.0)
+    # Same switches as residual_scores, so the harness and the verdict always score a run the same way
+    r = residual_by_channel(model, normalizer, run, masked)
+    scores = aggregate(r, how)
+    # A NumPy bool would break JSON and `is True`, so convert at the contract boundary
     flag = bool(scores.max() > threshold)
-    # Each channel's average miss
+    # Each channel's average miss, skipping the rows with no forecast
     per_channel = np.nanmean(r, axis=0)
     ranked = tuple(CHANNELS[i] for i in np.argsort(per_channel)[::-1])
-    # Placeholder: replaced by calibration on D8
+    # Placeholder. Replaced by calibration on D8
     confidence = 1.0 if flag else 0.0
     return Verdict(flag=flag, confidence=confidence, ranked_channels=ranked)
