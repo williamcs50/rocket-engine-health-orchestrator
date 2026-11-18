@@ -4,13 +4,16 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D7 · Wed Nov 18, 2026 · P3 command awareness
 
-**Exit test (Gate 1 rerun):** _pass or fail_. Same bar as D6, unchanged: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above 1.2%, and every seed's false alarm rate is at most 3%.
+**Exit test (D7):** _pass or fail_. Set before the rerun: at the 2% budget on val, over 3 seeds, the mean transient false alarm rate is at most 1.6% (half of D6's 3.2%), and the mean recall is at least 9.4% (D6's lowest seed).
+
+**Gate 1 rerun:** _pass or fail_. Same bar as D6, unchanged: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above 1.2%, and every seed's false alarm rate is at most 3%. Reported as optimistic, since it reuses val.
 
 | At the 2% budget | Before (D6, mean) | After |
 | --- | --- | --- |
 | Recall, seeds 0, 1, 2 | 10.0%, 15.4%, 9.4% | _ |
 | Mean recall over 3 seeds | 11.6% ± 3.3% | _ |
 | False alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% | _ |
+| Transient false alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% (mean 3.2%) | _ |
 | Mean delay | 11.9 to 12.2 s | _ |
 
 - Reproduce with `python -m evaluation.gate1` (about 22 minutes). Numbers in the committed `runs/gate1/metrics.json`.
@@ -19,16 +22,18 @@ One entry per session, newest first. Full decision entries live in [architecture
 - _
 
 ### Decided
-- Fix chosen: _ (candidates: command awareness, the differenced residual)
-- _
+- Fix order: command awareness first, the differenced residual second
+- Command awareness design: 10-sample throttle chunks with position tags, `TransformerDecoderLayer`, a required throttle, never masked
+- The ablation is D6's committed results, and new runs are named `_cmd` so D6's weights survive
+- D7 exit test: transient false alarms at most 1.6% rather than below 3.2%. Each seed's false alarm rate wobbles by roughly ±0.6 to ±0.9 points from sampling alone, so new seeds of the D6 model could land at 2.9% and pass "below 3.2%". It would also be weaker than the Gate 1 rerun, which needs every seed at most 3%: seeds at 3.4%, 3.4% and 2.7% would pass "below 3.2%" and still fail Gate 1
 
 ### Expected vs actual
 | Expected | Actual | Why |
 | --- | --- | --- |
-| _prediction, written before the rerun's output_ | _ | _ |
+| With cross attention, the mean transient false alarm rate over 3 seeds drops from 3.2% to about 1%, because the throttle step in the forecast gap now has its own token. Mean recall rises from 11.6% to about 14%, because the thresholds set by those spikes fall while the bearing signal stays the same size. Gate 1's 3% false alarm cap per seed is the uncertain part: once transients are gone, per-run bias on bearing temp may set the tail instead. I think Gate 1 passes, but I'm only about 60% sure (written before any D7 code) | _ | _ |
 
 ### Learned
-- _
+- Every D6 false alarm was transient. On each seed (17, 17 and 14 false alarm runs at 2%), every false alarm run alarmed within 5 s of a throttle change, a window covering 34.4% of a healthy run on average (measured over val's 500 healthy runs). Chance alone would rarely do that (about 0.344¹⁷ for one seed, as a rough illustration, since alarm timing isn't random), so the missing command input explains the false alarm failure. Reproduce the rates from `runs/gate1/metrics.json` and the 34.4% with `python -c "import numpy as np; from evaluation.harness import transient_mask; from generator.splits import SPLITS, fault_for, make_run; print(np.mean([transient_mask(make_run('val', s).throttle).mean() for s in SPLITS['val'] if fault_for('val', s) is None]))"`
 
 ### Ledger
 - **Built by hand:** _
