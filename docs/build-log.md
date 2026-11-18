@@ -2,6 +2,46 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D7 · Wed Nov 18, 2026 · P3 command awareness
+
+**Exit test (Gate 1 rerun):** _pass or fail_. Same bar as D6, unchanged: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above 1.2%, and every seed's false alarm rate is at most 3%.
+
+| At the 2% budget | Before (D6, mean) | After |
+| --- | --- | --- |
+| Recall, seeds 0, 1, 2 | 10.0%, 15.4%, 9.4% | _ |
+| Mean recall over 3 seeds | 11.6% ± 3.3% | _ |
+| False alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% | _ |
+| Mean delay | 11.9 to 12.2 s | _ |
+
+- Reproduce with `python -m evaluation.gate1` (about 22 minutes). Numbers in the committed `runs/gate1/metrics.json`.
+
+### Built
+- _
+
+### Decided
+- Fix chosen: _ (candidates: command awareness, the differenced residual)
+- _
+
+### Expected vs actual
+| Expected | Actual | Why |
+| --- | --- | --- |
+| _prediction, written before the rerun's output_ | _ | _ |
+
+### Learned
+- _
+
+### Ledger
+- **Built by hand:** _
+- **Delegated, can explain:** _
+- **Delegated, not yet understood:** _
+- **Moved:** _
+
+### Moved to tomorrow
+- _
+
+### Next
+_
+
 ## D6 · Tue Nov 17, 2026 · P2 evaluate
 
 **Exit test (Gate 1):** failed. Recall clears its bar, but false alarms on val exceed the 3% cap for both aggregations.
@@ -68,13 +108,14 @@ Reproduce:
 
 ### Ledger
 - **Built by hand:** `random_mask`, the core of `train` (random streams, normalizing and cutting runs, the training loop), and in `gate1.py`: `time_one_run`, `healthy_seeds`, `calibrate_thresholds` and the start of `main`
-- **Delegated, can explain:** _confirm: `forecast_run`, `residual_by_channel`, `residual_scores`, `to_verdict` (walked through today)_
+- **Delegated, can explain:** `forecast_run`, `residual_by_channel`, `residual_scores`, `to_verdict` (walked through on D6)
 - **Delegated, not yet understood:** `save_run` and `load_run` (`weights_only`, the architecture check), the probe curve, `Normalizer.to_dict` and `from_dict`, `aggregate` and its tests, `tests/test_train.py`, and in `gate1.py`: `peak_times`, `evaluate_val`, `bias_check` and the printing and saving in `main`
 - **Moved:** none
 
 ### Moved to tomorrow
 - Walk through everything in "not yet understood", starting with `load_run`
 - Fair z score fix, still due before Nov 20
+- The site build log update, not done since D4 moved it to the weekly review
 
 ### Next
 Wed 9:00, D7 goes to fixing, per the Gate 1 bar, and the GRU experiment is dropped:
