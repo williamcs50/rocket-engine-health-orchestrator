@@ -110,10 +110,11 @@ Reproduce:
 - **Built by hand:** `random_mask`, the core of `train` (random streams, normalizing and cutting runs, the training loop), and in `gate1.py`: `time_one_run`, `healthy_seeds`, `calibrate_thresholds` and the start of `main`
 - **Delegated, can explain:** `forecast_run`, `residual_by_channel`, `residual_scores`, `to_verdict` (walked through on D6)
 - **Delegated, not yet understood:** `save_run` and `load_run` (`weights_only`, the architecture check), the probe curve, `Normalizer.to_dict` and `from_dict`, `aggregate` and its tests, `tests/test_train.py`, and in `gate1.py`: `peak_times`, `evaluate_val`, `bias_check` and the printing and saving in `main`
-- **Moved:** none
+- **Still not yet understood, carried from D5:** `evaluation/checks.py`, `tests/test_data.py`, `tests/test_model.py`, the threshold consistency test in `tests/test_harness.py`, the `Normalizer` fixes (read-only arrays, flat-channel tolerance) and the `make_windows` guards
+- **Moved:** D5's walkthroughs, partly. Four functions walked through, the rest carried above
 
 ### Moved to tomorrow
-- Walk through everything in "not yet understood", starting with `load_run`
+- Walk through everything in "not yet understood", D6's and the items carried from D5, starting with `load_run`
 - Fair z score fix, still due before Nov 20
 - The site build log update, not done since D4 moved it to the weekly review
 
