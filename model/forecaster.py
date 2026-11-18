@@ -1,4 +1,4 @@
-"""Forecaster: shared encoder, channel IDs, masking, transformer fusion, one forecast per channel."""
+"""Forecaster: shared encoder, channel IDs, masking, fusion with cross-attention to the throttle, one forecast per channel."""
 
 import numpy as np
 import torch
@@ -14,23 +14,37 @@ N_HEADS = 4
 FFN_HIDDEN = 64
 # Transformer blocks, 1 to 2. Start with 1
 N_BLOCKS = 1
-# Windows per batch. Bounds memory, especially when masking makes 8 copies of each
-CHUNK = 2048
+# Windows per scoring batch. Bounds memory, especially when masking makes 8 copies of each
+SCORE_BATCH = 2048
+
+# Throttle samples per command token. With horizon 10, the last token is the forecast gap
+THROTTLE_CHUNK = 10
+
 # How per-channel residuals combine into one score. Compared against "max" on val at Gate 1
 AGGREGATE = "mean"
 
 
 class Forecaster(nn.Module):
-    """Forecasts every channel `horizon` samples ahead from all channels' windows, with optional masking."""
+    """Forecasts every channel `horizon` samples ahead from all channels' windows and the throttle history, with optional masking."""
 
     def __init__(self, horizon: int = HORIZON) -> None:
         super().__init__()
+        # The throttle history must split into whole chunks, or the last token would straddle the target
+        if (WINDOW + horizon) % THROTTLE_CHUNK:
+            raise ValueError(f"WINDOW + horizon must be a multiple of {THROTTLE_CHUNK}, not {WINDOW + horizon}")
         self.horizon = horizon
+        # Command tokens per throttle history. 11 with horizon 10
+        self.n_command_tokens = (WINDOW + horizon) // THROTTLE_CHUNK
         self.encoder = ChannelEncoder()
         self.channel_id = nn.Parameter(torch.randn(len(CHANNELS), D_EMBED) * 0.1)
         self.missing = nn.Parameter(torch.zeros(D_EMBED))
-        layer = nn.TransformerEncoderLayer(D_EMBED, N_HEADS, FFN_HIDDEN, dropout=0.0, batch_first=True)
-        self.fusion = nn.TransformerEncoder(layer, N_BLOCKS)
+        # Each 10-sample throttle chunk becomes one 16-number command token
+        self.throttle_embed = nn.Linear(THROTTLE_CHUNK, D_EMBED)
+        # Where each chunk sits in time. Built from the horizon, so a model rebuilt by load_run matches its weights
+        self.throttle_pos = nn.Parameter(torch.randn(self.n_command_tokens, D_EMBED) * 0.1)
+        # Self-attention across channels, then cross-attention to the command tokens, then feed-forward
+        layer = nn.TransformerDecoderLayer(D_EMBED, N_HEADS, FFN_HIDDEN, dropout=0.0, batch_first=True)
+        self.fusion = nn.TransformerDecoder(layer, N_BLOCKS)
         # Each channel's fused token -> its own forecast
         self.head = nn.Linear(D_EMBED, 1)
 
@@ -46,13 +60,21 @@ class Forecaster(nn.Module):
         # tag every token with its channel
         return t + self.channel_id
 
-    def forward(
-        self, windows: torch.Tensor, throttle_hist: torch.Tensor | None = None, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        """(batch, 8, WINDOW) -> (batch, 8): each channel `horizon` samples ahead, normalized units.
-        throttle_hist is accepted but unused until Wednesday's cross-attention."""
-        # (batch, 8, 16), channels mixed
-        fused = self.fusion(self.tokens(windows, mask))
+    def command_tokens(self, throttle_hist: torch.Tensor) -> torch.Tensor:
+        """(batch, WINDOW + horizon) throttle history to (batch, chunks, 16) command tokens."""
+        expected = self.n_command_tokens * THROTTLE_CHUNK
+        # A history cut for another horizon would be silently misaligned
+        if throttle_hist.shape[-1] != expected:
+            raise ValueError(f"throttle_hist must have {expected} samples, not {throttle_hist.shape[-1]}")
+        # (batch, chunks, 10): consecutive samples, oldest chunk first, the forecast gap last.
+        # The chunk count is explicit, so an empty batch still reshapes cleanly
+        chunks = throttle_hist.reshape(len(throttle_hist), self.n_command_tokens, THROTTLE_CHUNK)
+        return self.throttle_embed(chunks) + self.throttle_pos
+
+    def forward(self, windows: torch.Tensor, throttle_hist: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        """(batch, 8, WINDOW) plus (batch, WINDOW + horizon) throttle to (batch, 8): each channel `horizon` samples ahead."""
+        # Channel tokens are the queries (tgt), command tokens the keys and values (memory)
+        fused = self.fusion(self.tokens(windows, mask), self.command_tokens(throttle_hist))
 
         # (batch, 8): one forecast per channel
         return self.head(fused).squeeze(-1)
@@ -71,9 +93,9 @@ def forecast_run(model: Forecaster, normalizer: Normalizer, run: Run, masked: bo
     n_ch = len(CHANNELS)
 
     preds = []
-    for lo in range(0, len(windows), CHUNK):
-        w = torch.from_numpy(windows[lo:lo + CHUNK].astype(np.float32))
-        th = torch.from_numpy(throttle_hist[lo:lo + CHUNK].astype(np.float32))
+    for lo in range(0, len(windows), SCORE_BATCH):
+        w = torch.from_numpy(windows[lo:lo + SCORE_BATCH].astype(np.float32))
+        th = torch.from_numpy(throttle_hist[lo:lo + SCORE_BATCH].astype(np.float32))
         if masked:
             b = len(w)
             # Each window 8 times in a row
@@ -99,7 +121,6 @@ def residual_by_channel(model: Forecaster, normalizer: Normalizer, run: Run, mas
     x = normalizer.transform(run.sensors)
     forecast = forecast_run(model, normalizer, run, masked=masked)
     return (x - forecast) ** 2 / normalizer.floor
-
 
 
 def aggregate(r: np.ndarray, how: str = AGGREGATE) -> np.ndarray:

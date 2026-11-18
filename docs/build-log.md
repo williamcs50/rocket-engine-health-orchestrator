@@ -4,7 +4,7 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D7 · Wed Nov 18, 2026 · P3 command awareness
 
-**Exit test (D7):** _pass or fail_. Set before the rerun: at the 2% budget on val, over 3 seeds, the mean transient false alarm rate is at most 1.6% (half of D6's 3.2%), and the mean recall is at least 9.4% (D6's lowest seed).
+**Exit test (D7):** _pass or fail_. Set before the rerun: at the 2% budget on val, over 3 seeds, the mean transient false alarm rate is at most 1.6% (half of D6's 3.2%), and the mean recall is at least 9.4% (D6's lowest seed). Judged on the mean aggregate only, the one chosen on D6, decided before the run. The max line is printed but doesn't count.
 
 **Gate 1 rerun:** _pass or fail_. Same bar as D6, unchanged: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above 1.2%, and every seed's false alarm rate is at most 3%. Reported as optimistic, since it reuses val.
 

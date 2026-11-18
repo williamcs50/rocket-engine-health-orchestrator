@@ -30,6 +30,10 @@ def constant_run(value: float) -> Run:
 def report_seeds(healthy: bool, count: int) -> list[int]:
     return [s for s in SPLITS[REPORT_SPLIT] if (fault_for(REPORT_SPLIT, s) is None) == healthy][:count]
 
+def thr(batch: int, horizon: int = HORIZON) -> torch.Tensor:
+    """A random throttle history of the right length: the window plus the forecast gap."""
+    return torch.rand(batch, WINDOW + horizon)
+
 # Fast tests: the pieces, no training
 
 def test_encoder_emits_contract_shape() -> None:
@@ -50,12 +54,7 @@ def test_forecaster_tells_channels_apart() -> None:
     assert not torch.allclose(tokens[0], tokens[1])
 
 def test_forward_without_mask_still_works() -> None:
-    assert Forecaster()(torch.randn(4, len(CHANNELS), WINDOW)).shape == (4, len(CHANNELS))
-
-def test_forecaster_accepts_throttle_history() -> None:
-    # The argument exists today so Wednesday's cross attention doesn't break every caller
-    out = Forecaster(horizon=HORIZON)(torch.randn(4, len(CHANNELS), WINDOW), throttle_hist=torch.randn(4, WINDOW + HORIZON))
-    assert out.shape == (4, len(CHANNELS))
+    assert Forecaster()(torch.randn(4, len(CHANNELS), WINDOW), thr(4)).shape == (4, len(CHANNELS))
 
 def test_masked_channel_input_is_ignored() -> None:
     # Eval: no dropout, so the same input gives the same output
@@ -67,7 +66,8 @@ def test_masked_channel_input_is_ignored() -> None:
     mask = torch.zeros(2, len(CHANNELS), dtype=torch.bool)
     mask[:, 3] = True
     # Its content can't leak
-    torch.testing.assert_close(model(a, mask=mask), model(b, mask=mask))
+    throttle = thr(2)
+    torch.testing.assert_close(model(a, throttle, mask=mask), model(b, throttle, mask=mask))
 
 def test_masked_forecast_uses_other_channels() -> None:
     model = Forecaster().eval()
@@ -77,7 +77,41 @@ def test_masked_forecast_uses_other_channels() -> None:
     changed[:, 1] += 5.0
     mask = torch.zeros(2, len(CHANNELS), dtype=torch.bool)
     mask[:, 0] = True
-    assert not torch.allclose(model(windows, mask=mask)[:, 0], model(changed, mask=mask)[:, 0])
+    throttle = thr(2)
+    assert not torch.allclose(model(windows, throttle, mask=mask)[:, 0], model(changed, throttle, mask=mask)[:, 0])
+
+def test_throttle_changes_the_forecast() -> None:
+    # Same windows, different commands. A command-aware model must forecast differently
+    model = Forecaster(horizon=HORIZON).eval()
+    windows = torch.randn(2, len(CHANNELS), WINDOW)
+    a, b = thr(2), thr(2)
+    assert not torch.allclose(model(windows, a), model(windows, b))
+
+def test_masked_channel_forecast_reads_the_throttle() -> None:
+    # A hidden channel is forecast from the other channels plus the command, so changing only the
+    # throttle must change the masked channel's forecast. Masking hides history, never the command
+    model = Forecaster(horizon=HORIZON).eval()
+    windows = torch.randn(2, len(CHANNELS), WINDOW)
+    i = CHANNELS.index("bearing_temp")
+    mask = torch.zeros(2, len(CHANNELS), dtype=torch.bool)
+    mask[:, i] = True
+    hidden_a = model(windows, thr(2), mask=mask)[:, i]
+    hidden_b = model(windows, thr(2), mask=mask)[:, i]
+    assert not torch.allclose(hidden_a, hidden_b)
+
+def test_throttle_length_must_match() -> None:
+    # A throttle history cut for a different horizon would be silently misaligned, so it must be refused
+    model = Forecaster(horizon=HORIZON)
+    windows = torch.randn(2, len(CHANNELS), WINDOW)
+    # The window alone, missing the forecast gap, and one cut for horizon 20
+    for length in (WINDOW, WINDOW + 2 * HORIZON):
+        with pytest.raises(ValueError):
+            model(windows, torch.rand(2, length))
+
+def test_horizon_must_fit_whole_chunks() -> None:
+    # 100 + 15 doesn't split into 10-sample chunks, so building the model must fail
+    with pytest.raises(ValueError):
+        Forecaster(horizon=15)
 
 def test_scoring_forecasts_each_channel_with_its_own_input_masked() -> None:
     # The fault shows up as one channel disagreeing with the others, so each channel's

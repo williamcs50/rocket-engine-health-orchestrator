@@ -18,14 +18,18 @@ from generator.splits import SPLITS, fault_for, make_run
 from model.forecaster import aggregate, residual_by_channel
 from model.train import RUNS_DIR, load_run
 
-MODELS = ("h10_mask0.25_seed0", "h10_mask0.25_seed1", "h10_mask0.25_seed2", "h10_mask0_seed0")
+# D7's command-aware seeds. D6's models (h10_mask0.25_seed*, h10_mask0_seed0) are the ablation, with results in
+# runs/gate1. Reproduce them from commit c2cf7fe. The current load_run refuses them, since they predate command_aware
+MODELS = ("h10_mask0.25_cmd_seed0", "h10_mask0.25_cmd_seed1", "h10_mask0.25_cmd_seed2")
+# Where results are saved. Its own folder, so D6's runs/gate1/metrics.json stays as the ablation's record
+OUT_NAME = "gate1_cmd"
 AGGREGATES = ("mean", "max")
 # 2% primary, then 1% and 5%
 BUDGETS = (FA_BUDGET, *FA_SECONDARY)
 
 
 def time_one_run() -> None:
-    """How long one model takes to score one run. Multiply by 1,500 runs x 4 models for the full gate."""
+    """How long one model takes to score one run. Multiply by 1,500 runs x 3 models for the full gate."""
     trained = load_run(RUNS_DIR / MODELS[0])
     run = make_run(REPORT_SPLIT, SPLITS[REPORT_SPLIT][0])
     began = time.perf_counter()
@@ -132,18 +136,26 @@ def main(limit: int | None = None) -> None:
     n_faulted = sum(fault_for(REPORT_SPLIT, s) is not None for s in SPLITS[REPORT_SPLIT][:limit])
     for b in BUDGETS:
         print(f"\nVal at the {b:.0%} budget, {n_faulted} faulted runs")
-        print(f"{'detector':26s} {'recall':>7s} {'false alarm':>12s} {'early':>7s} {'delay':>8s}")
+        print(f"{'detector':26s} {'recall':>7s} {'false alarm':>12s} {'transient':>10s} {'early':>7s} {'delay':>8s}")
         for detector in thresholds:
             rep = reports[(detector, b)]
             delay = f"{rep.mean_delay_s:.1f} s" if rep.mean_delay_s is not None else "n/a"
-            print(f"{detector:26s} {rep.recall:7.1%} {rep.false_alarm_rate:12.1%} {rep.early_alarm_rate:7.1%} {delay:>8s}")
+            print(
+                f"{detector:26s} {rep.recall:7.1%} {rep.false_alarm_rate:12.1%} "
+                f"{rep.transient_false_alarm_rate:10.1%} {rep.early_alarm_rate:7.1%} {delay:>8s}"
+            )
 
     masked_runs = [m for m in MODELS if models[m].config["mask_prob"] > 0]
     print(f"\nMasked seeds at {FA_BUDGET:.0%}, mean ± spread over {len(masked_runs)} seeds")
     for how in AGGREGATES:
         recall = [reports[(f"{m}/{how}", FA_BUDGET)].recall for m in masked_runs]
         fa = [reports[(f"{m}/{how}", FA_BUDGET)].false_alarm_rate for m in masked_runs]
-        print(f"  {how:4s} recall {np.mean(recall):.1%} ± {np.std(recall, ddof=1):.1%}, lowest seed {min(recall):.1%}, highest false alarm {max(fa):.1%}")
+        # The D7 exit test is judged on the mean aggregate's line only. Max is reported, not judged
+        transient = [reports[(f"{m}/{how}", FA_BUDGET)].transient_false_alarm_rate for m in masked_runs]
+        print(
+            f"  {how:4s} recall {np.mean(recall):.1%} ± {np.std(recall, ddof=1):.1%}, lowest seed {min(recall):.1%}, "
+            f"highest false alarm {max(fa):.1%}, mean transient false alarm {np.mean(transient):.1%}"
+        )
 
     bias = bias_check(models[MODELS[0]], limit)
     print(
@@ -154,7 +166,7 @@ def main(limit: int | None = None) -> None:
 
     # Quick checks aren't saved, so a 20 run result can never be committed as the Gate 1 numbers
     if limit is None:
-        out = RUNS_DIR / "gate1"
+        out = RUNS_DIR / OUT_NAME
         out.mkdir(parents=True, exist_ok=True)
         metrics = {
             "thresholds": {d: {f"{b:.0%}": t for b, t in tb.items()} for d, tb in thresholds.items()},

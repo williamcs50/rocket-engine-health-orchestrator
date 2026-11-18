@@ -52,9 +52,10 @@ def test_train_records_the_settings_it_used() -> None:
     # The starting probe, then one per LOG_EVERY steps
     assert len(result.losses) == 2
 
-@pytest.mark.parametrize("mask_prob, name", [(0.0, "h10_mask0_seed0"), (0.25, "h10_mask0.25_seed0")])
+@pytest.mark.parametrize("mask_prob, name", [(0.0, "h10_mask0_cmd_seed0"), (0.25, "h10_mask0.25_cmd_seed0")])
 def test_run_name_is_tidy(mask_prob: float, name: str) -> None:
-    assert run_name({"horizon": 10, "mask_prob": mask_prob, "seed": 0}) == name
+    # Command-aware runs get their own folders, so retraining can never overwrite D6's weights
+    assert run_name({"horizon": 10, "mask_prob": mask_prob, "seed": 0, "command_aware": True}) == name
 
 def test_saved_run_scores_exactly_like_the_original(tmp_path: Path) -> None:
     # Proof that what Gate 1 evaluates is exactly what was trained
@@ -73,6 +74,20 @@ def test_load_refuses_a_different_architecture(tmp_path: Path) -> None:
     config = json.loads((tmp_path / "config.json").read_text())
     # Same weight shapes, different model. Loading must fail loudly
     config["n_heads"] = 2
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    with pytest.raises(ValueError):
+        load_run(tmp_path)
+
+@pytest.mark.parametrize("edit", ["remove", "false"])
+def test_d6_run_is_refused(tmp_path: Path, edit: str) -> None:
+    # A run saved before command awareness has no command_aware in its config, so it must not load
+    save_run(untrained(), tmp_path)
+    config = json.loads((tmp_path / "config.json").read_text())
+    if edit == "remove":
+        del config["command_aware"]
+    else:
+        config["command_aware"] = False
+
     (tmp_path / "config.json").write_text(json.dumps(config))
     with pytest.raises(ValueError):
         load_run(tmp_path)

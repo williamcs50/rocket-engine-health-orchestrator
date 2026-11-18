@@ -1,7 +1,7 @@
 """Train the forecaster on healthy train runs, with random channel masking. Saves and loads runs/<name>/.
 
-python -m model.train                  trains the default model into runs/h10_mask0.25_seed0/
-python -m model.train --mask-prob 0    trains the no-masking comparison model into runs/h10_mask0_seed0/
+python -m model.train                  trains the default model into runs/h10_mask0.25_cmd_seed0/
+python -m model.train --mask-prob 0    trains the no-masking comparison model into runs/h10_mask0_cmd_seed0/
 """
 
 import argparse
@@ -18,7 +18,15 @@ from contracts import CHANNELS
 from generator.splits import SPLITS, make_run
 from model.data import HORIZON, Normalizer, make_windows
 from model.encoder import ENCODER_HIDDEN
-from model.forecaster import AGGREGATE, FFN_HIDDEN, N_BLOCKS, N_HEADS, Forecaster, floor_weighted_mse
+from model.forecaster import (
+    AGGREGATE,
+    FFN_HIDDEN,
+    N_BLOCKS,
+    N_HEADS,
+    THROTTLE_CHUNK,
+    Forecaster,
+    floor_weighted_mse,
+)
 
 # Train runs used. Start small and scale to 2,000 if the model underfits
 N_TRAIN_RUNS = 500
@@ -70,13 +78,16 @@ def random_mask(batch: int, p: float, rng: np.random.Generator) -> torch.Tensor:
     return torch.from_numpy(mask)
 
 
-def architecture() -> dict[str, int]:
+def architecture() -> dict[str, int | bool]:
     """Settings that change how a model runs. A saved model only makes sense with the same ones."""
     return {
         "encoder_hidden": ENCODER_HIDDEN,
         "n_heads": N_HEADS,
         "ffn_hidden": FFN_HIDDEN,
         "n_blocks": N_BLOCKS,
+        # D6 configs have neither key, so a model trained before cross-attention is refused with a clear message
+        "command_aware": True,
+        "throttle_chunk": THROTTLE_CHUNK,
     }
 
 
@@ -171,7 +182,9 @@ def train(horizon: int = HORIZON, mask_prob: float = MASK_PROB, seed: int = 0, s
 
 def run_name(config: dict[str, Any]) -> str:
     """Folder name that says which settings made the model. :g writes 0 and 0.25, not 0.0."""
-    return f"h{config['horizon']}_mask{config['mask_prob']:g}_seed{config['seed']}"
+    # .get, since D6 configs have no such key and keep their names. New runs get new folders, so D6's weights survive
+    cmd = "_cmd" if config.get("command_aware") else ""
+    return f"h{config['horizon']}_mask{config['mask_prob']:g}{cmd}_seed{config['seed']}"
 
 
 def save_run(result: TrainResult, folder: Path) -> None:
