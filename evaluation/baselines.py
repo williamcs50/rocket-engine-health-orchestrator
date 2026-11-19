@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from contracts import CHANNELS, Run
+from evaluation.profile import ProfileReference
 from generator.engine import REDLINES
 
 REDLINE_THRESHOLD = 1.0  # fixed, never tuned: a channel exactly at its redline scores 1
@@ -41,6 +42,22 @@ class ZScoreBaseline:
     def scores(self, run: Run) -> np.ndarray:
         """Per sample, the largest absolute z-score across channels. Shape (N_STEPS,)."""
         return (np.abs(run.sensors - self.mean) / self.std).max(axis=1)
+
+@dataclass(frozen=True)
+class ConditionedZScore:
+    """Per-channel z score against healthy runs at the same point in the throttle profile. The fair baseline."""
+
+    # Healthy mean and std per bin and channel, from evaluation/profile.py
+    reference: ProfileReference
+
+    @classmethod
+    def fit(cls, runs: Iterable[Run]) -> "ConditionedZScore":
+        # Healthy runs only, refused inside ProfileReference.fit. No training, so all 2,000 train runs can be used
+        return cls(reference=ProfileReference.fit(runs, lambda run: run.sensors))
+
+    def scores(self, run: Run) -> np.ndarray:
+        """Per sample, the largest absolute z score across channels, as D4 does. Shape (N_STEPS,)."""
+        return np.abs(self.reference.standardize(run.sensors, run.throttle)).max(axis=1)
 
 def persistence_forecast(sensors: np.ndarray, horizon: int) -> np.ndarray:
     """Forecast each sample as the value `horizon` steps earlier. The first rows repeat row 0."""

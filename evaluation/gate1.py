@@ -11,7 +11,7 @@ from dataclasses import asdict
 import numpy as np
 
 from contracts import CHANNELS, DT_S
-from evaluation.baselines import REDLINE_THRESHOLD, ZScoreBaseline, redline_scores
+from evaluation.baselines import REDLINE_THRESHOLD, ConditionedZScore, ZScoreBaseline, redline_scores
 from evaluation.budget import CATCH_WINDOW_S, FA_BUDGET, FA_SECONDARY, REPORT_SPLIT, THRESHOLD_SPLIT
 from evaluation.harness import score_run, summarize, threshold_at_budget, transient_mask
 from generator.splits import SPLITS, fault_for, make_run
@@ -42,7 +42,7 @@ def healthy_seeds(split: str, limit: int | None = None) -> list[int]:
     return seeds[:limit]
 
 
-def calibrate_thresholds(models: dict, zscore, limit: int | None = None) -> dict:
+def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None) -> dict:
     """Pass 1: every detector's peak score on calibrate's healthy runs, then one threshold per budget."""
     # Detector name to one peak per healthy run
     peaks: dict[str, list[float]] = {}
@@ -57,7 +57,9 @@ def calibrate_thresholds(models: dict, zscore, limit: int | None = None) -> dict
                 # Both aggregates come from the same residuals, so masked scoring runs once
                 peaks.setdefault(f"{name}/{how}", []).append(float(aggregate(r, how).max()))
         # The z score needs no model, so it's scored once per run
-        peaks.setdefault("zscore", []).append(float(zscore.scores(run).max()))
+        # The baselines need no model, so each is scored once per run
+        for name, baseline in baselines.items():
+            peaks.setdefault(name, []).append(float(baseline.scores(run).max()))
 
     # One threshold per detector and budget
     thresholds = {name: {b: threshold_at_budget(p, b) for b in BUDGETS} for name, p in peaks.items()}
@@ -78,13 +80,15 @@ def peak_times(trained, n_runs: int = 10) -> None:
         print(f"  seed {seed}: {row * DT_S:5.1f} s, driven by {CHANNELS[int(r[row].argmax())]}, near a throttle change: {near_change}")
 
 
-def evaluate_val(models: dict, zscore, thresholds: dict, limit: int | None = None) -> dict:
+def evaluate_val(models: dict, baselines: dict, thresholds: dict, limit: int | None = None) -> dict:
     """Pass 2: every detector at every budget on val. Each run simulated once, each model scored once."""
     # (detector, budget) to [(is healthy, RunResult), ...]
     rows: dict[tuple[str, float], list] = {}
     for seed in SPLITS[REPORT_SPLIT][:limit]:
         run = make_run(REPORT_SPLIT, seed)
-        scores = {"redline": redline_scores(run), "zscore": zscore.scores(run)}
+        scores = {"redline": redline_scores(run)}
+        for name, baseline in baselines.items():
+            scores[name] = baseline.scores(run)
         for name, trained in models.items():
             masked = trained.config["mask_prob"] > 0
             r = residual_by_channel(trained.model, trained.normalizer, run, masked=masked)
@@ -124,14 +128,19 @@ def bias_check(trained, limit: int | None = None) -> dict:
 def main(limit: int | None = None) -> None:
     models = {name: load_run(RUNS_DIR / name) for name in MODELS}
     # Train only, as in D4. A quick check fits on fewer runs, since only the wiring is being tested
-    zscore = ZScoreBaseline.fit(make_run("train", s) for s in SPLITS["train"][:limit])
+    baselines = {
+        "zscore": ZScoreBaseline.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
+        # The fair baseline for the Nov 20 test table. No training, so all 2,000 train runs. The Gate 1 bar
+        # still uses D4's fixed 1.2%
+        "zscore_fair": ConditionedZScore.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
+    }
 
-    thresholds = calibrate_thresholds(models, zscore, limit)
+    thresholds = calibrate_thresholds(models, baselines, limit)
     for detector, by_budget in thresholds.items():
         print(detector, {f"{b:.0%}": round(t, 3) for b, t in by_budget.items()})
 
     peak_times(models[MODELS[0]])
-    reports = evaluate_val(models, zscore, thresholds, limit)
+    reports = evaluate_val(models, baselines, thresholds, limit)
 
     n_faulted = sum(fault_for(REPORT_SPLIT, s) is not None for s in SPLITS[REPORT_SPLIT][:limit])
     for b in BUDGETS:
