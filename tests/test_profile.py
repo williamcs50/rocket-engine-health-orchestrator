@@ -96,7 +96,9 @@ def test_a_flat_bin_gets_the_std_floor() -> None:
     keys = bin_index(throttle_profile())
     values = (keys % 7).astype(float)
     ref = ProfileReference.fit(runs, lambda run: values, min_samples=1)
-    np.testing.assert_allclose(ref.std, STD_FLOOR * values.std())
+    # Only the bins the throttle visits. Columns it never visits fall back to the pooled std instead
+    visited = np.unique(keys)
+    np.testing.assert_allclose(ref.std[visited], STD_FLOOR * values.std())
 
 
 def test_an_unseen_column_falls_back_to_pooled_stats() -> None:
