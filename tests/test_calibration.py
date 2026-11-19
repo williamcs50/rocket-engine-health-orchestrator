@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from evaluation.calibration import PercentileConfidence, share_at_or_above
+from evaluation.calibration import PercentileConfidence, share_at_or_above, within_tolerance
 from evaluation.harness import threshold_at_budget
 
 # Small slack for float comparisons like 490 / 500 against 0.98
@@ -51,6 +51,13 @@ def test_exit_test_share_equals_the_false_alarm_rate(q: float) -> None:
     share = share_at_or_above(PercentileConfidence.fit(calibrate).confidence(val), q)
     false_alarm_rate = np.mean(val > threshold_at_budget(calibrate, 1 - q))
     assert share == pytest.approx(false_alarm_rate)
+
+
+@pytest.mark.parametrize("share, target, ok", [(0.08, 0.05, True), (0.02, 0.05, True), (0.082, 0.05, False), (0.018, 0.05, False)])
+def test_a_share_exactly_on_the_edge_passes(share: float, target: float, ok: bool) -> None:
+    # Shares come in steps of 1 / 500, so one can sit exactly 3 points off. In floating point 0.08 - 0.05 is
+    # 0.030000000000000006, which a plain <= 0.03 would wrongly fail. One step further must still fail
+    assert within_tolerance(share, target, 0.03) is ok
 
 
 def test_a_nan_peak_is_refused() -> None:
