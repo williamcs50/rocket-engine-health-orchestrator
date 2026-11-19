@@ -13,7 +13,7 @@ import numpy as np
 from contracts import CHANNELS, DT_S
 from evaluation.baselines import REDLINE_THRESHOLD, ConditionedZScore, ZScoreBaseline, redline_scores
 from evaluation.budget import CATCH_WINDOW_S, FA_BUDGET, FA_SECONDARY, REPORT_SPLIT, THRESHOLD_SPLIT
-from evaluation.calibration import PercentileConfidence, share_at_or_above
+from evaluation.calibration import PercentileConfidence, share_at_or_above, within_tolerance
 from evaluation.harness import score_run, summarize, threshold_at_budget, transient_mask
 from generator.splits import SPLITS, fault_for, make_run
 from model.forecaster import aggregate, residual_by_channel
@@ -121,7 +121,8 @@ def calibration_exit_test(calibrations: dict, healthy_val_peaks: dict, detectors
         confidence = calibrations[detector].confidence(np.array(healthy_val_peaks[detector]))
         for q in CALIBRATION_QS:
             share = share_at_or_above(confidence, q)
-            results[f"{detector}@{q}"] = {"share": share, "target": 1 - q, "passes": abs(share - (1 - q)) <= CALIBRATION_TOLERANCE}
+            passes = within_tolerance(share, 1 - q, CALIBRATION_TOLERANCE)
+            results[f"{detector}@{q}"] = {"share": share, "target": 1 - q, "passes": passes}
     return results
 
 

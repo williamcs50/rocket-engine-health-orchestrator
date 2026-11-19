@@ -42,3 +42,9 @@ class PercentileConfidence:
 def share_at_or_above(confidences: np.ndarray, q: float) -> float:
     """The exit test's count: the share of runs whose confidence is at least q."""
     return float(np.mean(np.asarray(confidences) >= q))
+
+
+def within_tolerance(share: float, target: float, tolerance: float) -> bool:
+    """Whether a share is within tolerance of its target, edge included."""
+    # A tiny slack, since a share exactly on the edge can come out a hair over it in floating point
+    return bool(abs(share - target) <= tolerance + 1e-9)
