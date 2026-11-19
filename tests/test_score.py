@@ -1,7 +1,9 @@
 import numpy as np
 
 from contracts import CHANNELS, DT_S, N_STEPS, Run
-from evaluation.score import FIRST_DIFF, REFERENCE_SEEDS, StandardizedScore, lagged_difference
+import pytest
+
+from evaluation.score import FIRST_DIFF, REFERENCE_SEEDS, StandardizedScore, lagged_difference, mean_residual
 from generator.splits import SPLITS
 from model.train import N_TRAIN_RUNS
 
@@ -101,6 +103,37 @@ def test_fit_scores_each_run_once() -> None:
 
     StandardizedScore.fit(runs, residual_fn, min_samples=1)
     assert sorted(calls) == [0, 1, 2]
+
+
+def test_mean_residual_keeps_the_blind_rows_nan() -> None:
+    # gate1's aggregate turns NaN into 0, which would hide the blind rows. This helper must not
+    r = np.random.default_rng(2).normal(size=(N_STEPS, len(CHANNELS))) ** 2
+    r[:FIRST_FORECAST] = np.nan
+    s = mean_residual(r)
+    assert np.isnan(s[:FIRST_FORECAST]).all()
+    np.testing.assert_allclose(s[FIRST_FORECAST:], r[FIRST_FORECAST:].mean(axis=1))
+
+
+def test_zero_filled_blind_rows_are_refused_when_scoring() -> None:
+    # Zeros in the blind rows would score finite values, start the difference at 2000 and break the -inf fill
+    score, runs = fitted()
+    s = residuals(0)
+    s[:FIRST_FORECAST] = 0.0
+    with pytest.raises(ValueError):
+        score.scores(s, runs[0].throttle)
+
+
+def test_zero_filled_blind_rows_are_refused_when_fitting() -> None:
+    # The same mistake at fit time would build both references on fake zeros
+    runs = [Run(throttle=throttle(), sensors=np.zeros((N_STEPS, len(CHANNELS))), seed=s) for s in range(2)]
+
+    def zero_filled(run: Run) -> np.ndarray:
+        s = residuals(run.seed)
+        s[:FIRST_FORECAST] = 0.0
+        return s
+
+    with pytest.raises(ValueError):
+        StandardizedScore.fit(runs, zero_filled, min_samples=1)
 
 
 def test_reference_seeds_were_never_trained_on() -> None:
