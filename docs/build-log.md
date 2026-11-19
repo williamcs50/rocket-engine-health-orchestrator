@@ -13,8 +13,10 @@ One entry per session, newest first. Full decision entries live in [architecture
 - If the new score is adopted, calibration is rerun on it before tomorrow. That only means scoring calibrate's runs again
 - Adoption rule: the new score is adopted only if it passes Gate 1 on val, all three conditions. Otherwise tomorrow's test runs with D7's scoring (mean aggregate). If both fail Gate 1, the test still runs with D7's scoring and is reported as having failed Gate 1 on val. All 3 seeds go to test, reported per seed plus mean and spread. No seed is chosen
 - Calibration exit test: held out on val's 500 healthy runs today, and test's tomorrow. Counted per run, using each run's peak confidence, which matches how Gate 1 counts false alarms
-- Calibration starts by 1:30 PM. If temperature scaling hasn't met the ±3 point check by 3:00 PM, use the plan's fallback, the empirical quantile
-- The new score starts only after calibration and the z score fix. If it isn't built and evaluated by 5:30 PM, it's dropped, and tomorrow's test runs with D7's scoring
+- The z score fix runs from 1:00 to 2:30 PM, after lunch. It also builds the reference logic the new score reuses
+- Calibration starts by 2:30 PM. If temperature scaling hasn't met the ±3 point check by 4:00 PM, use the plan's fallback, the empirical quantile
+- The new score starts only after calibration and the z score fix. It must be built and tested by about 5:00 PM, so the 25 minute Gate 1 rerun finishes by 5:30 PM. If it isn't evaluated by 5:30 PM, it's dropped, and tomorrow's test runs with D7's scoring
+- Revised before lunch: the first version said calibration by 1:30 PM and the fallback at 3:00 PM, which left the z score fix only 30 minutes
 
 ### Diagnostic (predictions written on D7, run this morning)
 `python -m evaluation.checks slow_state`, model `h10_mask0.25_cmd_seed0`. Its count of seed 0's false alarm runs matches Gate 1's (17), so the script scores runs the same way Gate 1 did. It ran first in the base environment, then again in `reho` with identical output.
