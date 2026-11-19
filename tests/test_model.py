@@ -30,6 +30,10 @@ def constant_run(value: float) -> Run:
 def report_seeds(healthy: bool, count: int) -> list[int]:
     return [s for s in SPLITS[REPORT_SPLIT] if (fault_for(REPORT_SPLIT, s) is None) == healthy][:count]
 
+def fixed_confidence(peak: float) -> float:
+    """A stand-in calibration for tests that only check the flag."""
+    return 0.5
+
 def thr(batch: int, horizon: int = HORIZON) -> torch.Tensor:
     """A random throttle history of the right length: the window plus the forecast gap."""
     return torch.rand(batch, WINDOW + horizon)
@@ -179,8 +183,26 @@ def test_verdict_and_scores_use_the_same_aggregate(masked: bool, how: str) -> No
     run = make_run(REPORT_SPLIT, SPLITS[REPORT_SPLIT][0])
     peak = residual_scores(model, normalizer, run, masked=masked, how=how).max()
     # Just below and just above the run's peak
-    assert to_verdict(model, normalizer, run, threshold=peak * 0.99, masked=masked, how=how).flag is True
-    assert to_verdict(model, normalizer, run, threshold=peak * 1.01, masked=masked, how=how).flag is False
+    assert to_verdict(model, normalizer, run, threshold=peak * 0.99, confidence=fixed_confidence, masked=masked, how=how).flag is True
+    assert to_verdict(model, normalizer, run, threshold=peak * 1.01, confidence=fixed_confidence, masked=masked, how=how).flag is False
+
+def test_verdict_confidence_comes_from_the_calibration() -> None:
+    # The verdict asks the calibration about the run's peak score and passes the answer on as a plain float,
+    # since the Verdict contract round-trips through JSON
+    model = Forecaster(horizon=HORIZON).eval()
+    normalizer = Normalizer.fit([constant_run(1.0), constant_run(3.0)])
+    run = make_run(REPORT_SPLIT, SPLITS[REPORT_SPLIT][0])
+    peak = residual_scores(model, normalizer, run).max()
+    asked = []
+
+    def confidence(p: float) -> float:
+        asked.append(p)
+        return np.float64(0.42)
+
+    verdict = to_verdict(model, normalizer, run, threshold=peak * 2, confidence=confidence)
+    assert asked == [pytest.approx(peak)]
+    assert type(verdict.confidence) is float
+    assert verdict.confidence == 0.42
 
 # Slow exit tests: one trained model shared by all of them
 
@@ -233,6 +255,6 @@ def test_exit_fault_residuals_rise(trained: TrainResult) -> None:
 @pytest.mark.slow
 def test_exit_end_to_end_verdict(trained: TrainResult) -> None:
     run = make_run(REPORT_SPLIT, report_seeds(healthy=False, count=1)[0])
-    result = to_verdict(trained.model, trained.normalizer, run, threshold=1.0)
+    result = to_verdict(trained.model, trained.normalizer, run, threshold=1.0, confidence=fixed_confidence)
     assert isinstance(result, Verdict)
     assert set(result.ranked_channels) == set(CHANNELS)
