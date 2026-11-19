@@ -1,5 +1,7 @@
 """Forecaster: shared encoder, channel IDs, masking, fusion with cross-attention to the throttle, one forecast per channel."""
 
+from collections.abc import Callable
+
 import numpy as np
 import torch
 from torch import nn
@@ -146,18 +148,25 @@ def to_verdict(
     normalizer: Normalizer,
     run: Run,
     threshold: float,
+    confidence: Callable[[float], float],
     masked: bool = True,
     how: str = AGGREGATE,
 ) -> Verdict:
-    """Flag, a placeholder confidence until calibration (D8), channels ranked by residual."""
+    """Flag, confidence and channels ranked by residual.
+
+    threshold and confidence must both come from the same detector's calibrate peaks, so a run flags exactly
+    when its confidence is at least 1 minus the budget. Mixing detectors would show "alarm, confidence 0.97".
+    confidence is the share of healthy calibrate runs this run is more unusual than, not the probability of a fault.
+    It's passed in as a function, so model/ needs nothing from evaluation/.
+    """
     # Same switches as residual_scores, so the harness and the verdict always score a run the same way
     r = residual_by_channel(model, normalizer, run, masked)
     scores = aggregate(r, how)
+    peak = scores.max()
     # A NumPy bool would break JSON and `is True`, so convert at the contract boundary
-    flag = bool(scores.max() > threshold)
+    flag = bool(peak > threshold)
     # Each channel's average miss, skipping the rows with no forecast
     per_channel = np.nanmean(r, axis=0)
     ranked = tuple(CHANNELS[i] for i in np.argsort(per_channel)[::-1])
-    # Placeholder. Replaced by calibration on D8
-    confidence = 1.0 if flag else 0.0
-    return Verdict(flag=flag, confidence=confidence, ranked_channels=ranked)
+    # A plain float at the contract boundary, for the same reason as the flag
+    return Verdict(flag=flag, confidence=float(confidence(peak)), ranked_channels=ranked)

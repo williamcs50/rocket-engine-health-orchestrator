@@ -13,6 +13,7 @@ import numpy as np
 from contracts import CHANNELS, DT_S
 from evaluation.baselines import REDLINE_THRESHOLD, ConditionedZScore, ZScoreBaseline, redline_scores
 from evaluation.budget import CATCH_WINDOW_S, FA_BUDGET, FA_SECONDARY, REPORT_SPLIT, THRESHOLD_SPLIT
+from evaluation.calibration import PercentileConfidence, share_at_or_above
 from evaluation.harness import score_run, summarize, threshold_at_budget, transient_mask
 from generator.splits import SPLITS, fault_for, make_run
 from model.forecaster import aggregate, residual_by_channel
@@ -27,6 +28,9 @@ OUT_NAME = "gate1_d8"
 AGGREGATES = ("mean", "max")
 # 2% primary, then 1% and 5%
 BUDGETS = (FA_BUDGET, *FA_SECONDARY)
+# Calibration exit test: the share of healthy val runs with confidence at least q must be within 3 points of 1 minus q
+CALIBRATION_QS = (0.8, 0.9, 0.95)
+CALIBRATION_TOLERANCE = 0.03
 
 
 def time_one_run() -> None:
@@ -43,8 +47,11 @@ def healthy_seeds(split: str, limit: int | None = None) -> list[int]:
     return seeds[:limit]
 
 
-def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None) -> dict:
-    """Pass 1: every detector's peak score on calibrate's healthy runs, then one threshold per budget."""
+def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None) -> tuple[dict, dict]:
+    """Pass 1: every detector's peak score on calibrate's healthy runs, then its thresholds and its calibration.
+
+    Both come from the same peaks, built here in one place, so a detector's flag and confidence always agree.
+    """
     # Detector name to one peak per healthy run
     peaks: dict[str, list[float]] = {}
     for seed in healthy_seeds(THRESHOLD_SPLIT, limit):
@@ -65,7 +72,9 @@ def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None
     thresholds = {name: {b: threshold_at_budget(p, b) for b in BUDGETS} for name, p in peaks.items()}
     # The redline is fixed and never tuned, so it keeps 1.0 at every budget
     thresholds["redline"] = {b: REDLINE_THRESHOLD for b in BUDGETS}
-    return thresholds
+    # Each detector's confidence, from the same healthy peaks as its thresholds
+    calibrations = {name: PercentileConfidence.fit(p) for name, p in peaks.items()}
+    return thresholds, calibrations
 
 
 def peak_times(trained, n_runs: int = 10) -> None:
@@ -80,10 +89,12 @@ def peak_times(trained, n_runs: int = 10) -> None:
         print(f"  seed {seed}: {row * DT_S:5.1f} s, driven by {CHANNELS[int(r[row].argmax())]}, near a throttle change: {near_change}")
 
 
-def evaluate_val(models: dict, baselines: dict, thresholds: dict, limit: int | None = None) -> dict:
-    """Pass 2: every detector at every budget on val. Each run simulated once, each model scored once."""
+def evaluate_val(models: dict, baselines: dict, thresholds: dict, limit: int | None = None) -> tuple[dict, dict]:
+    """Pass 2: every detector at every budget on val, plus each detector's healthy val peaks for calibration."""
     # (detector, budget) to [(is healthy, RunResult), ...]
     rows: dict[tuple[str, float], list] = {}
+    # Detector to one peak per healthy val run, for the calibration exit test
+    healthy_val_peaks: dict[str, list[float]] = {}
     for seed in SPLITS[REPORT_SPLIT][:limit]:
         run = make_run(REPORT_SPLIT, seed)
         scores = {"redline": redline_scores(run)}
@@ -98,7 +109,20 @@ def evaluate_val(models: dict, baselines: dict, thresholds: dict, limit: int | N
             for b in BUDGETS:
                 result = score_run(s, run.throttle, thresholds[detector][b], run.fault)
                 rows.setdefault((detector, b), []).append((run.fault is None, result))
-    return {key: summarize(results) for key, results in rows.items()}
+            if run.fault is None:
+                healthy_val_peaks.setdefault(detector, []).append(float(s.max()))
+    return {key: summarize(results) for key, results in rows.items()}, healthy_val_peaks
+
+
+def calibration_exit_test(calibrations: dict, healthy_val_peaks: dict, detectors: list[str]) -> dict:
+    """Per detector and q: the share of healthy val runs with confidence at least q, and whether it's within tolerance."""
+    results = {}
+    for detector in detectors:
+        confidence = calibrations[detector].confidence(np.array(healthy_val_peaks[detector]))
+        for q in CALIBRATION_QS:
+            share = share_at_or_above(confidence, q)
+            results[f"{detector}@{q}"] = {"share": share, "target": 1 - q, "passes": abs(share - (1 - q)) <= CALIBRATION_TOLERANCE}
+    return results
 
 
 def bias_check(trained, limit: int | None = None) -> dict:
@@ -135,12 +159,12 @@ def main(limit: int | None = None) -> None:
         "zscore_fair": ConditionedZScore.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
     }
 
-    thresholds = calibrate_thresholds(models, baselines, limit)
+    thresholds, calibrations = calibrate_thresholds(models, baselines, limit)
     for detector, by_budget in thresholds.items():
         print(detector, {f"{b:.0%}": round(t, 3) for b, t in by_budget.items()})
 
     peak_times(models[MODELS[0]])
-    reports = evaluate_val(models, baselines, thresholds, limit)
+    reports, healthy_val_peaks = evaluate_val(models, baselines, thresholds, limit)
 
     n_faulted = sum(fault_for(REPORT_SPLIT, s) is not None for s in SPLITS[REPORT_SPLIT][:limit])
     for b in BUDGETS:
@@ -166,6 +190,19 @@ def main(limit: int | None = None) -> None:
             f"highest false alarm {max(fa):.1%}, mean transient false alarm {np.mean(transient):.1%}"
         )
 
+    # Judged per seed on the mean aggregate, as logged on 2026-11-19
+    seeds_mean = [f"{m}/mean" for m in MODELS]
+    calibration = calibration_exit_test(calibrations, healthy_val_peaks, seeds_mean)
+    print(f"\nCalibration exit test: share of healthy {REPORT_SPLIT} runs with confidence at least q, target 1 minus q, within 3 points")
+    for detector in seeds_mean:
+        cells = [
+            f"q {q}: {calibration[f'{detector}@{q}']['share']:.1%} ({'pass' if calibration[f'{detector}@{q}']['passes'] else 'FAIL'})"
+            for q in CALIBRATION_QS
+        ]
+        print(f"  {detector:26s} " + "   ".join(cells))
+    passed = all(v["passes"] for v in calibration.values())
+    print(f"  Exit test: {'PASS' if passed else 'FAIL'}, judged per seed")
+
     bias = bias_check(models[MODELS[0]], limit)
     print(
         f"\nBias check, bearing temp ({MODELS[0]}): healthy level std {bias['healthy_std']:.2f}, "
@@ -182,6 +219,7 @@ def main(limit: int | None = None) -> None:
             # JSON keys must be strings, so (detector, budget) becomes "detector@2%"
             "reports": {f"{d}@{b:.0%}": asdict(rep) for (d, b), rep in reports.items()},
             "bias": bias,
+            "calibration_exit_test": calibration,
         }
         (out / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         print(f"\nsaved {out / 'metrics.json'}")
