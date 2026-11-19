@@ -21,8 +21,9 @@ from model.train import RUNS_DIR, load_run
 # D7's command-aware seeds. D6's models (h10_mask0.25_seed*, h10_mask0_seed0) are the ablation, with results in
 # runs/gate1. Reproduce them from commit c2cf7fe. The current load_run refuses them, since they predate command_aware
 MODELS = ("h10_mask0.25_cmd_seed0", "h10_mask0.25_cmd_seed1", "h10_mask0.25_cmd_seed2")
-# Where results are saved. Its own folder, so D6's runs/gate1/metrics.json stays as the ablation's record
-OUT_NAME = "gate1_cmd"
+# Where results are saved. Each day's run gets its own folder, so earlier committed results stay as they were:
+# D6 in runs/gate1, D7 in runs/gate1_cmd
+OUT_NAME = "gate1_d8"
 AGGREGATES = ("mean", "max")
 # 2% primary, then 1% and 5%
 BUDGETS = (FA_BUDGET, *FA_SECONDARY)
@@ -56,7 +57,6 @@ def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None
             for how in AGGREGATES:
                 # Both aggregates come from the same residuals, so masked scoring runs once
                 peaks.setdefault(f"{name}/{how}", []).append(float(aggregate(r, how).max()))
-        # The z score needs no model, so it's scored once per run
         # The baselines need no model, so each is scored once per run
         for name, baseline in baselines.items():
             peaks.setdefault(name, []).append(float(baseline.scores(run).max()))

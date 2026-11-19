@@ -40,7 +40,7 @@ Nozzle temp peak residual, ratio unmasked ÷ masked (smaller means unmasking hel
 Seed 0's first false alarm times on healthy val runs, at its 2% mean threshold of 145.021: 1.1, 1.1, 1.1, 1.1, 1.1, 2.6, 3.1, 3.2, 3.2, 4.5, 4.6, 4.9, 5.0, 5.5, 13.2, 28.7 and 47.9 s.
 
 ### Built
-- _
+- The fair z score, done at 3:42 PM (commit e353e7a). `evaluation/profile.py` bins every sample by the throttle profile and fits a healthy reference with merging, fallback counts and a std floor. `ConditionedZScore` in `evaluation/baselines.py` standardizes each channel against it and combines channels as D4 does. It's wired into gate1.py as `zscore_fair`, next to D4's unchanged `zscore`. The full run fits both on the 2,000 train runs, simulating them twice, about a minute or two extra
 
 ### Decided
 - Next scoring fix: a standardized, differenced residual, fully specified in the decision log before any code. Judged by the Gate 1 bar, unchanged, with no separate exit test
