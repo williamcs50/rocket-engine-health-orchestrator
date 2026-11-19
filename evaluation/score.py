@@ -17,10 +17,26 @@ from model.data import HORIZON
 # The 15 s gap matches the catch window, so a fault can't leak into its own baseline while a catch still counts
 LAG_FAR = 2000
 LAG_NEAR = 1500
+# The model's first forecast. Every row before it is blind, and must stay NaN until the very end
+FIRST_FORECAST = WINDOW - 1 + HORIZON
 # The first sample whose baseline window has a forecast throughout: the first forecast (109) plus 2,000
-FIRST_DIFF = WINDOW - 1 + HORIZON + LAG_FAR
+FIRST_DIFF = FIRST_FORECAST + LAG_FAR
 # Healthy train runs never trained on (training used the first 500), and outside calibrate and val
 REFERENCE_SEEDS = SPLITS["train"][500:1000]
+
+
+def mean_residual(r: np.ndarray) -> np.ndarray:
+    """(N_STEPS, 8) residuals to (N_STEPS,) by the mean, keeping the blind rows NaN.
+
+    This is the D6 mean aggregate without aggregate's fill of 0, which this score must not see.
+    """
+    return r.mean(axis=1)
+
+
+def check_blind_rows(s: np.ndarray) -> None:
+    """Refuse a residual whose blind rows were filled in, for example by aggregate's 0."""
+    if np.isfinite(s[:FIRST_FORECAST]).any():
+        raise ValueError("the blind rows must be NaN. Use mean_residual, not aggregate, which fills them with 0")
 
 
 def lagged_difference(s: np.ndarray) -> np.ndarray:
@@ -54,12 +70,15 @@ class StandardizedScore:
         runs = list(runs)
         # Masked scoring is the slow part, so each run is scored once and both references reuse it
         levels = {id(run): np.asarray(residual_fn(run), dtype=float) for run in runs}
+        for s in levels.values():
+            check_blind_rows(s)
         level = ProfileReference.fit(runs, lambda run: levels[id(run)], min_samples)
         difference = ProfileReference.fit(runs, lambda run: lagged_difference(levels[id(run)]), min_samples)
         return cls(level=level, difference=difference)
 
     def scores(self, s: np.ndarray, throttle: np.ndarray) -> np.ndarray:
         """(N_STEPS,): the level z before FIRST_DIFF, the difference z from it on, -inf for the blind rows."""
+        check_blind_rows(s)
         level_z = self.level.standardize(s, throttle)
         diff_z = self.difference.standardize(lagged_difference(s), throttle)
         combined = level_z.copy()
