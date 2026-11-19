@@ -23,6 +23,8 @@ MIN_SAMPLES = 1000
 # No std falls below this fraction of the pooled std, so nothing divides by nearly 0
 STD_FLOOR = 0.01
 
+# Samples per time bin: 50 at 10 ms. Binning in whole samples means no rounding can cross an edge
+SAMPLES_PER_TIME_BIN = round(TIME_BIN_S / DT_S)
 # 20 time bins of 0.5 s up to 10 s, plus the steady bin
 N_TIME_BINS = round(STEADY_S / TIME_BIN_S) + 1
 # Phases: the ramp bins first, then the time bins, so a later phase is always later in time
@@ -46,14 +48,15 @@ def bin_index(throttle: np.ndarray) -> np.ndarray:
     ramp_end = 1 + int(np.argmax(~changed[1:]))
     in_ramp = i < ramp_end
 
-    # Progress through the ramp, 0 to 1, in RAMP_BINS bins
-    ramp_bin = np.minimum((i / ramp_end * RAMP_BINS).astype(int), RAMP_BINS - 1)
+    # Progress through the ramp in RAMP_BINS bins. Whole-number division, so no float sits between
+    ramp_bin = np.minimum(i * RAMP_BINS // ramp_end, RAMP_BINS - 1)
 
     # The most recent sample that changed. The ramp's last sample counts as a change
     last = np.maximum.accumulate(np.where(changed, i, 0))
-    since = (i - last) * DT_S
+    # Samples since the last change, kept as a whole number
+    since = i - last
     # 0.5 s bins, with everything from 10 s onwards in the last, steady bin
-    time_bin = np.minimum((since / TIME_BIN_S).astype(int), N_TIME_BINS - 1)
+    time_bin = np.minimum(since // SAMPLES_PER_TIME_BIN, N_TIME_BINS - 1)
 
     phase = np.where(in_ramp, ramp_bin, RAMP_BINS + time_bin)
     # Up if the last change went up. The startup ramp is always up
@@ -98,6 +101,14 @@ class ProfileReference:
     fallback_bins: int
     fallback_samples: int
 
+    def __post_init__(self) -> None:
+        # Frozen stops reassigning a field but not editing an array in place. The reference must stay
+        # identical between fitting and scoring, so each array is copied and locked, as in Normalizer
+        for name in ("mean", "std"):
+            arr = np.array(getattr(self, name), dtype=float)
+            arr.setflags(write=False)
+            object.__setattr__(self, name, arr)
+
     @classmethod
     def fit(
         cls, runs: Iterable[Run], values: Callable[[Run], np.ndarray], min_samples: int = MIN_SAMPLES
@@ -126,6 +137,8 @@ class ProfileReference:
         # Pooled over every sample: the fallback, and the scale for the std floor
         n = counts.sum()
         pooled_mean = sums.sum(axis=0) / n
+        # Variance as E[x²] − mean². Rounding can push it just below 0 when the mean is large next to the
+        # spread, so it's clipped at 0 before the square root, here and per group below
         pooled_std = np.sqrt(np.maximum(squares.sum(axis=0) / n - pooled_mean**2, 0.0))
 
         mean = np.empty_like(sums)
