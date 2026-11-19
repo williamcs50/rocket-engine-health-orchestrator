@@ -17,6 +17,7 @@ One entry per session, newest first. Full decision entries live in [architecture
 - Calibration starts by 2:30 PM. If temperature scaling hasn't met the ±3 point check by 4:00 PM, use the plan's fallback, the empirical quantile
 - The new score starts only after calibration and the z score fix. It must be built and tested by about 5:00 PM, so the 25 minute Gate 1 rerun finishes by 5:30 PM. If it isn't evaluated by 5:30 PM, it's dropped, and tomorrow's test runs with D7's scoring
 - Revised before lunch: the first version said calibration by 1:30 PM and the fallback at 3:00 PM, which left the z score fix only 30 minutes
+- Revised in the afternoon: the z score fix runs over, so calibration starts as soon as the conditioned z score is built, the fallback stays at 4:00 PM, and the new score keeps its 5:30 PM cutoff, so it will almost certainly be dropped
 
 ### Diagnostic (predictions written on D7, run this morning)
 `python -m evaluation.checks slow_state`, model `h10_mask0.25_cmd_seed0`. Its count of seed 0's false alarm runs matches Gate 1's (17), so the script scores runs the same way Gate 1 did. It ran first in the base environment, then again in `reho` with identical output.

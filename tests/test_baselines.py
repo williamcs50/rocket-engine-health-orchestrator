@@ -2,8 +2,16 @@ import numpy as np
 import pytest
 
 from contracts import CHANNELS, N_STEPS, FaultLabel, Run
-from evaluation.baselines import REDLINE_THRESHOLD, ZScoreBaseline, persistence_forecast, redline_scores
+from evaluation.baselines import (
+    REDLINE_THRESHOLD,
+    ConditionedZScore,
+    ZScoreBaseline,
+    persistence_forecast,
+    redline_scores,
+)
+from evaluation.profile import N_PHASES, RAMP_BINS, bin_index, unpack
 from generator.engine import REDLINES, make_fault, make_throttle, simulate
+from generator.splits import SPLITS, fault_for, make_run
 
 def run_with(sensors: np.ndarray, fault: FaultLabel | None = None) -> Run:
     """A Run around hand-built sensors. Throttle doesn't matter to these baselines."""
@@ -53,3 +61,42 @@ def test_persistence_forecasts_the_value_from_horizon_steps_back() -> None:
     forecast = persistence_forecast(sensors, horizon)
     assert forecast.shape == sensors.shape
     np.testing.assert_array_equal(forecast[horizon:], sensors[:-horizon])
+
+# Conditioned z score: the fair baseline for the Nov 20 test table. D4's ZScoreBaseline stays unchanged
+
+def test_conditioned_zscore_scores_one_value_per_sample() -> None:
+    runs = [make_run("train", s) for s in SPLITS["train"][:2]]
+    assert ConditionedZScore.fit(runs).scores(runs[0]).shape == (N_STEPS,)
+
+def test_conditioned_zscore_combines_channels_like_d4() -> None:
+    # Two runs at 1.0 and 3.0 give every channel a mean of 2 and a std of 1. A run sitting at +4 sigma on one
+    # channel and -6 sigma on another must score 6 everywhere: the largest absolute z, as D4 does
+    z = ConditionedZScore.fit([constant_run(1.0), constant_run(3.0)])
+    sensors = np.full((N_STEPS, len(CHANNELS)), 2.0)
+    sensors[:, 3], sensors[:, 5] = 6.0, -4.0
+    np.testing.assert_allclose(z.scores(run_with(sensors)), 6.0)
+
+def test_conditioning_removes_the_startup_excess() -> None:
+    # D4 compares every sample with one whole-run mean, so the startup ramp sits many sigma away. Conditioned on
+    # the throttle profile, the ramp should look like the rest of the run. Medians over thousands of samples
+    # barely move between runs, so the test is stable. Fit on 30 runs for speed, scored on 3 held-out runs
+    fit_runs = [make_run("train", s) for s in SPLITS["train"][:30]]
+    d4, conditioned = ZScoreBaseline.fit(fit_runs), ConditionedZScore.fit(fit_runs)
+    held_out = [make_run("train", s) for s in SPLITS["train"][100:103]]
+
+    def ramp_to_steady(detector: ZScoreBaseline | ConditionedZScore) -> float:
+        ramp, steady = [], []
+        for run in held_out:
+            phase, _, _ = unpack(bin_index(run.throttle))
+            scores = detector.scores(run)
+            ramp.append(scores[phase < RAMP_BINS])
+            steady.append(scores[phase == N_PHASES - 1])
+        return float(np.median(np.concatenate(ramp)) / np.median(np.concatenate(steady)))
+
+    assert ramp_to_steady(d4) > 2
+    assert 0.5 < ramp_to_steady(conditioned) < 2
+
+def test_conditioned_zscore_rejects_faulted_runs() -> None:
+    faulty_seed = next(s for s in SPLITS["val"] if fault_for("val", s) is not None)
+    with pytest.raises(ValueError):
+        ConditionedZScore.fit([constant_run(1.0), make_run("val", faulty_seed)])
