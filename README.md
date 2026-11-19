@@ -10,7 +10,7 @@ Engine monitoring usually checks each sensor against its own redline. A degradin
 
 A reduced-order physics model generates engine telemetry and injects faults as physical changes, so their signatures emerge across channels on their own. Each of the 8 sensor channels is encoded separately, and an attention layer weighs the channels against each other and against the throttle command. The model is trained only on normal runs to forecast what each channel should do next, and when reality departs from the forecast, that gap becomes the anomaly score. The output is an advisory verdict: a flag, a calibrated confidence and the channels that mattered most. It only advises, and redline protection keeps all authority.
 
-> **Status:** v1 in progress (Nov 10 to 23, 2026). Design complete, implementation underway, no model trained yet. Live progress: [build log](https://williamopyrchal.com/build-log) · [two-week plan](docs/two-week-plan.md)
+> **Status:** v1 in progress (Nov 10 to 23, 2026). Model trained and evaluated on validation. Gate 1 not yet passed: recall clears its bar, but false alarms on val exceed the 3% cap. Next: diagnosing startup transients. Daily log: [build log](docs/build-log.md) · [two-week plan](docs/two-week-plan.md)
 
 ## Installation
 
@@ -26,15 +26,26 @@ pip install -r requirements.txt
 
 Or with venv: `python -m venv .venv && source .venv/bin/activate`, then `pip install -r requirements.txt`.
 
-Check the setup by running the tests:
+Check the setup by running the fast tests (about 20 seconds, the same set CI runs):
 
 ```bash
-pytest
+pytest -m "not slow"
 ```
+
+The slow exit tests train a model and take about 90 seconds: `pytest -m slow`.
 
 ## Quickstart
 
-Coming in v1.
+Interim, until v1. Train one model and evaluate it against the baselines:
+
+```bash
+# Train one model, about a minute. Saved to runs/h10_mask0.25_cmd_seed0/
+python -m model.train --seed 0
+
+# Evaluate on val against the redline and z score, about 25 minutes.
+# It expects all three seeds (--seed 0, 1 and 2). Add --limit 20 for a quick check
+python -m evaluation.gate1
+```
 
 ## Results
 

@@ -4,22 +4,63 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D7 · Wed Nov 18, 2026 · P3 command awareness
 
-**Exit test (D7):** _pass or fail_. Set before the rerun: at the 2% budget on val, over 3 seeds, the mean transient false alarm rate is at most 1.6% (half of D6's 3.2%), and the mean recall is at least 9.4% (D6's lowest seed). Judged on the mean aggregate only, the one chosen on D6, decided before the run. The max line is printed but doesn't count.
+**Exit test (D7):** failed on both conditions. Set before the rerun: at the 2% budget on val, over 3 seeds, the mean transient false alarm rate is at most 1.6% (half of D6's 3.2%), and the mean recall is at least 9.4% (D6's lowest seed). Judged on the mean aggregate only, the one chosen on D6, decided before the run. The max line is printed but doesn't count.
+- Mean transient false alarm rate 3.1%, against at most 1.6%: fails
+- Mean recall 8.1%, against at least 9.4%: fails
 
-**Gate 1 rerun:** _pass or fail_. Same bar as D6, unchanged: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above 1.2%, and every seed's false alarm rate is at most 3%. Reported as optimistic, since it reuses val.
+**Gate 1 rerun:** failed again, on the same condition as D6. Same bar, unchanged: at the 2% budget on val, the 3 masked seeds' mean recall is at least 5%, every seed's recall is above 1.2%, and every seed's false alarm rate is at most 3%. Reported as optimistic, since it reuses val.
+- Mean recall 8.1%: passes
+- Lowest seed 1.4%: passes, by one catch over the z score's 6
+- False alarms 3.4%, 4.2%, 1.8%: two seeds over 3%, fails
 
-| At the 2% budget | Before (D6, mean) | After |
+| At the 2% budget, mean aggregate | Before (D6) | After (D7, command-aware) |
 | --- | --- | --- |
-| Recall, seeds 0, 1, 2 | 10.0%, 15.4%, 9.4% | _ |
-| Mean recall over 3 seeds | 11.6% ± 3.3% | _ |
-| False alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% | _ |
-| Transient false alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% (mean 3.2%) | _ |
-| Mean delay | 11.9 to 12.2 s | _ |
+| Recall, seeds 0, 1, 2 | 10.0%, 15.4%, 9.4% | 17.6%, 1.4%, 5.2% |
+| Mean recall over 3 seeds | 11.6% ± 3.3% | 8.1% ± 8.5% |
+| False alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% | 3.4%, 4.2%, 1.8% |
+| Transient false alarms, seeds 0, 1, 2 | 3.4%, 3.4%, 2.8% (mean 3.2%) | 3.4%, 4.2%, 1.8% (mean 3.1%) |
+| Threshold, seeds 0, 1, 2 | 225, 202, 256 | 145, 425, 220 |
+| Mean delay | 11.9 to 12.2 s | 9.8 to 12.9 s |
 
-- Reproduce with `python -m evaluation.gate1` (about 22 minutes). Numbers in the committed `runs/gate1/metrics.json`.
+- Every false alarm is still transient: the overall and transient rates match on every seed, as on D6.
+- Reproduce with `python -m evaluation.gate1` (about 25 minutes). D7's numbers are in the committed `runs/gate1_cmd/metrics.json`, D6's in `runs/gate1/metrics.json`.
 
 ### Built
-- _
+- `model/forecaster.py`: command awareness. The throttle history is cut into 10-sample chunks (`THROTTLE_CHUNK`), each embedded to 16 numbers plus a learned position tag (`n_command_tokens` rows, from the horizon). The fusion block is `TransformerDecoderLayer`: self-attention across channels, cross-attention from channel tokens to command tokens, feed-forward. `throttle_hist` is required, its length is checked, and a horizon that doesn't give whole chunks is refused. `CHUNK` renamed `SCORE_BATCH`
+- `model/train.py`: `architecture()` records `command_aware` and `throttle_chunk`, so D6 runs are refused. `run_name` adds `_cmd`, so D6's folders and weights survive
+- `evaluation/gate1.py`: the three `_cmd` seeds, results in `runs/gate1_cmd/` so D6's stay as the ablation, a transient false alarm column, and the mean transient rate the exit test is judged on
+- Tests: the throttle changes the forecast, a masked channel still reads the throttle, wrong throttle lengths and a horizon of 15 are refused, D6 runs are refused, run names carry `_cmd`. 158 fast tests pass locally and in CI
+- Trained 3 command-aware seeds, 65 to 67 s each
+
+| Seed | D6 last-10 probe mean | D7 last-10 probe mean | Drop |
+| --- | --- | --- | --- |
+| 0 | 8.73 | 7.18 | 17.8% |
+| 1 | 9.26 | 7.40 | 20.1% |
+| 2 | 8.98 | 6.30 | 29.8% |
+| Mean ± spread | 9.0 ± 0.3 | 7.0 ± 0.6 | |
+
+The last-10 probe mean averages the last 10 probe values (steps 9,100 to 10,000). It's used instead of the final value because the tail wobbles: seed 2's D6 final value (7.93) was a lucky low against its last-10 mean of 8.98, which would have understated its drop. Each seed's probe batch is drawn from the same stream as on D6, so each row compares identical windows and masks. Seed 0's last 10 values only wobble (6.85 to 7.7), so 10,000 steps is enough. Reproduce from the committed `runs/*/metrics.json`:
+
+```bash
+python -c "
+import json, numpy as np
+for s in range(3):
+    d6 = json.load(open(f'runs/h10_mask0.25_seed{s}/metrics.json'))['losses']
+    d7 = json.load(open(f'runs/h10_mask0.25_cmd_seed{s}/metrics.json'))['losses']
+    f6, f7, m6, m7 = d6[-1], d7[-1], np.mean(d6[-10:]), np.mean(d7[-10:])
+    print(s, 'final', round(f6,3), round(f7,3), f'{1-f7/f6:.1%}', '| last-10', round(m6,2), round(m7,2), f'{1-m7/m6:.1%}')
+"
+```
+
+Expected output:
+
+```
+0 final 8.412 6.982 17.0% | last-10 8.73 7.18 17.8%
+1 final 9.022 7.298 19.1% | last-10 9.26 7.4 20.1%
+2 final 7.933 6.053 23.7% | last-10 8.98 6.3 29.8%
+```
+
+- The D5 exit tests still pass on a command-aware model (`pytest -m slow tests/test_model.py -s`), with the fast channels much closer to their floors: feed pressure 0.0012 to 0.0007, speed 0.0006 to 0.0003
 
 ### Decided
 - Fix order: command awareness first, the differenced residual second
@@ -30,22 +71,33 @@ One entry per session, newest first. Full decision entries live in [architecture
 ### Expected vs actual
 | Expected | Actual | Why |
 | --- | --- | --- |
-| With cross attention, the mean transient false alarm rate over 3 seeds drops from 3.2% to about 1%, because the throttle step in the forecast gap now has its own token. Mean recall rises from 11.6% to about 14%, because the thresholds set by those spikes fall while the bearing signal stays the same size. Gate 1's 3% false alarm cap per seed is the uncertain part: once transients are gone, per-run bias on bearing temp may set the tail instead. I think Gate 1 passes, but I'm only about 60% sure (written before any D7 code) | _ | _ |
+| With cross attention, the mean transient false alarm rate over 3 seeds drops from 3.2% to about 1%, because the throttle step in the forecast gap now has its own token. Mean recall rises from 11.6% to about 14%, because the thresholds set by those spikes fall while the bearing signal stays the same size. Gate 1's 3% false alarm cap per seed is the uncertain part: once transients are gone, per-run bias on bearing temp may set the tail instead. I think Gate 1 passes, but I'm only about 60% sure (written before any D7 code) | Wrong on every part. The mean transient false alarm rate barely moved, 3.2% to 3.1%. Mean recall fell to 8.1%, with seeds at 17.6%, 1.4% and 5.2%. Gate 1 failed again on false alarms | I assumed the transient spikes came from not knowing the commands. The sampled healthy peaks moved to startup: on the same 10 calibrate runs, D6 had 1 of 10 under 8 s and 9 mid-run (10.8 to 49.5 s), while D7 has 8 of 10 at 2.8 to 6.8 s. The driving channel shifted too, from mostly fast channels on D6 (speed 3, feed pressure 3, chamber pressure 1, coolant flow 1, nozzle temp 2) to mostly slow thermal ones on D7 (nozzle temp 5, bearing temp 2, feed pressure 2, chamber pressure 1). That fits command awareness fixing what the throttle can explain and exposing what it can't. It's 10 runs on one seed, so a hint, not a finding. Peak times come from `peak_times` in each day's gate1 output: D7 with `python -m evaluation.gate1 --limit 20`, D6 from gate1.py at commit c2cf7fe. Lower average forecasting error also didn't shrink the tail: seeds 0 and 1 have nearly the same last-10 probe mean (7.18 and 7.40) but thresholds of 145 and 425 |
+| Diagnostic 1, written before running it. Both diagnostic predictions were written and reviewed by my tutor before the run, but committed only after it, so the commit timestamp doesn't prove the order. The tutor's review does. The text is unchanged from what was reviewed. Using `h10_mask0.25_cmd_seed0` and the first 10 healthy calibrate runs, I'll compare nozzle temp's peak residual masked against unmasked, both at startup (0 to 8 s) and in steady state (after 8 s, outside the transient window). I predict that in at least 6 of the 10 runs, the unmasked startup peak is at most half the masked startup peak, and unmasking shrinks the startup peak by a larger fraction than the steady-state peak. If fewer than 6 runs meet both conditions, the slow-state mechanism is not supported. If the startup peak halves but the steady-state peak shrinks just as much, the effect is general and not about slow state. I'm about 50% confident, because the mechanism is untested, the control makes it a stricter claim, and my last two predictions about where false alarms come from both missed | _ | _ |
+| Diagnostic 2, written before running it. For the same seed at its 2% mean threshold of 145.0 (from `runs/gate1_cmd/metrics.json`), I'll take the first alarm time of each of the 17 healthy val runs that raise a false alarm. I predict that at least 12 of the 17 first alarm before 10 s, during startup, and if fewer than 12 do, startup isn't the main source of false alarms. I'm about 70% confident, because 8 of 10 sampled healthy peaks already sat between 2.8 and 6.8 s, though those were peaks on calibrate rather than false alarms on val. This reads val again, but it only describes a result I already have and tunes nothing | _ | _ |
 
 ### Learned
 - Every D6 false alarm was transient. On each seed (17, 17 and 14 false alarm runs at 2%), every false alarm run alarmed within 5 s of a throttle change, a window covering 34.4% of a healthy run on average (measured over val's 500 healthy runs). Chance alone would rarely do that (about 0.344¹⁷ for one seed, as a rough illustration, since alarm timing isn't random), so the missing command input explains the false alarm failure. Reproduce the rates from `runs/gate1/metrics.json` and the 34.4% with `python -c "import numpy as np; from evaluation.harness import transient_mask; from generator.splits import SPLITS, fault_for, make_run; print(np.mean([transient_mask(make_run('val', s).throttle).mean() for s in SPLITS['val'] if fault_for('val', s) is None]))"`
+- The model is blind for the first 1.09 s of every run (`WINDOW - 1 + horizon` samples with no forecast), and `aggregate` fills those rows with a score of 0. That's safe because floor-weighted squared residuals can't be negative, so 0 can never cross a positive threshold or set a run's peak. It would not be safe for a score that can go negative, like the differenced residual, or one where low means anomalous: there the fill must be a value that can never alarm. The blind spot costs nothing here, because bearing wear onset is drawn from 10 to 30 s (D3 exit criteria), so no fault can start before the first forecast. With real telemetry, a fault right at startup would fall in this blind spot
+- Probe loss measures the typical window, while thresholds come from the worst moment in each healthy run. Command awareness cut the last-10 probe mean by 18 to 30% on every seed and still left the false alarm rate where it was. A forecasting improvement isn't a detection improvement until the tail moves
+- Hypothesis, not yet tested: the remaining startup peaks come from slow state the window can't see. Nozzle temp is a heat balance with a time constant of several seconds at low coolant flow, and at startup its value depends on how long the engine has been running. In masked scoring its own history is hidden, and 1.1 s of throttle can't reconstruct that state. If so, no amount of command awareness fixes these peaks, and it would also explain the per-run bias (healthy bearing temp level 4.8 to 92.7 at the 5th to 95th percentile, std 30, against a median fault rise of 74)
+- A 60% prediction that misses is normal. Recording the miss is what gives the 60% meaning
 
 ### Ledger
-- **Built by hand:** _
-- **Delegated, can explain:** _
-- **Delegated, not yet understood:** _
-- **Moved:** _
+- **Built by hand:** the `THROTTLE_CHUNK` constant and the horizon check in `Forecaster.__init__`, `test_d6_run_is_refused`
+- **Delegated, can explain:** `save_run` (why the normalizer is committed), `Normalizer.to_dict` and `from_dict`, `aggregate`, the probe curve, `load_run`'s horizon and architecture checks (all walked through today)
+- **Delegated, not yet understood:** `command_tokens` and the decoder fusion, the new fast tests in `test_model.py`, the `run_name` and `architecture()` changes, the gate1.py changes
+- **Moved:** from D6's "not yet understood", `save_run`, `load_run`, `to_dict` and `from_dict`, `aggregate` and the probe curve are now understood. The rest of D6's and D5's carried list remains
 
 ### Moved to tomorrow
-- _
+- The diagnostic before any further fix: for the 10 healthy calibrate runs, each channel's peak residual masked against unmasked. Plus, for one seed, when each false alarm happens across all 500 healthy val runs
+- Choose the next fix with the tutor from the diagnostic: the differenced residual (logged second) or a longer throttle history
+- Walk through the rest of "not yet understood", D7's, D6's and D5's carried items
+- This evening's architecture.md gaps: model and training settings, pipeline details, the fusion row's "1 to 2 blocks"
+- Fair z score fix, due before Nov 20
+- The site build log update
 
 ### Next
-_
+Thu 9:00: run the diagnostic, outside the bar, then choose the next fix with the tutor. Val has now been used for two rounds of decisions, so any further val result is reported as more optimistic, and Friday's test run is the real judgment
 
 ## D6 · Tue Nov 17, 2026 · P2 evaluate
 

@@ -9,7 +9,7 @@ flowchart LR
     CMD["Throttle command<br/>shared by engine and model"]
     GEN["Physics generator<br/>reduced-order model, faults<br/>8 sensors, 60 s at 10 ms"]
     ENC["Shared channel encoder<br/>100-sample window per channel<br/>each to 16 numbers"]
-    FUS["Fusion block, 1 to 2<br/>self-attention across channels<br/>cross-attention to throttle"]
+    FUS["Fusion block, 1 layer<br/>self-attention across channels<br/>cross-attention to throttle"]
     SCORE["Anomaly score<br/>forecast residual"]
     CAL["Calibration<br/>fit on the calibrate split"]
     VER["Verdict, advisory only<br/>flag, confidence, ranked channels"]
@@ -46,8 +46,8 @@ Values live in `contracts.py`. Changing one requires a decision-log entry below.
 | Encoder window | `WINDOW` | 100 samples (1 s) |
 | Embedding size | `D_EMBED` | 16 numbers per channel, so (batch, 8, 16) |
 | Encoder weights | none | Shared across all 8 channels, plus a learned channel-ID embedding. Each channel normalized with train-split statistics |
-| Fusion | none | 1 to 2 transformer blocks, 4 heads, feed-forward 16 → 64 → 16 |
-| Training objective | none | Forecast all 8 channels 10 to 20 samples ahead (horizon tuned on validation) |
+| Fusion | `N_BLOCKS` | Exactly 1 block today, up to 2 allowed. Each block: self-attention across the 8 channel tokens, cross-attention from channel tokens to throttle tokens, feed-forward 16 → 64 → 16. 4 heads |
+| Training objective | `HORIZON` | Forecast all 8 channels 10 samples ahead. The horizon may be tuned to 20 on validation, and must be a multiple of 10 so the throttle history splits into whole chunks |
 | Run layout | `Run` | `throttle` (6000,) and `sensors` (6000, 8) in `CHANNELS` order, time first, kept separate. Plus `seed` and `fault` (a `FaultLabel`, or None when healthy). Shapes validated on creation. Arrays are copied and read-only |
 | Fault ground truth | `FaultLabel` | `kind` (`bearing_wear` only), `onset_s` (0 to 60 s), `rate` (positive), `channels` (at least one, all in `CHANNELS`). Validated on creation. Read by evaluation only, never by the model |
 | Output | `Verdict` | `flag`, `confidence` (0 to 1), `ranked_channels`. Validated on creation, round-trips through JSON |
@@ -82,7 +82,25 @@ The reasoning is in floor commitment 2 of the [design rationale](design-doc.md).
 
 ## Pipeline details
 
-Coming once the model exists (Nov 16).
+As of D7 (Nov 18). Every stage below is built except calibration (D8).
+
+**1. Data.** `make_run` simulates a 60 s run from a seed. `Normalizer.fit` takes each channel's mean and std from healthy train runs only, plus its noise floor, `SENSOR_NOISE² / std²`, in normalized units. `make_windows` cuts a run into views, not copies: a 100-sample window per channel, the throttle from the window's start up to the target time (`WINDOW + horizon` samples), and the target `horizon` samples after the window ends. The first forecast is at sample 109 (1.09 s).
+
+**2. Channel encoder** (`model/encoder.py`). One MLP shared by all 8 channels: `Linear(100, 64)`, GELU, `Linear(64, 16)`. A learned channel ID (8 × 16) is added to each token, after masking.
+
+**3. Masking.** A hidden channel's token is replaced by a learned "missing" vector before its channel ID is added. Training hides each channel with probability 0.25, never all eight. Scoring forecasts each channel with only that channel hidden, using 8 copies of every window.
+
+**4. Throttle tokens.** The throttle history (110 samples at horizon 10) is cut into 10-sample chunks. Each chunk becomes 16 numbers through `Linear(10, 16)`, plus a learned position tag (one per chunk, 11 at horizon 10). The last chunk is the forecast gap. The throttle is never masked.
+
+**5. Fusion** (`model/forecaster.py`). One `TransformerDecoderLayer` (d = 16, 4 heads, feed-forward 64, no dropout): self-attention across the 8 channel tokens, cross-attention from channel tokens (queries) to throttle tokens (keys and values), then feed-forward. A shared `Linear(16, 1)` head turns each channel's token into its forecast.
+
+**6. Training** (`model/train.py`). 500 healthy train runs, 10,000 Adam steps at learning rate 1e-3, batches of 256 random (run, window) pairs. The loss is each channel's squared error divided by its noise floor, averaged. Batches, masks and the probe each have their own random stream (`[seed, 1]`, `[seed, 2]`, `[seed, 3]`). The probe is one fixed batch of 1,024 windows, measured before training and every 100 steps. Each run saves `config.json` (every setting plus the normalizer) and `metrics.json` (the probe curve and training time) to git, and `model.pt` locally only.
+
+**7. Scoring.** Each channel's residual is `(actual − forecast)² / floor`, which equals `(error / sensor noise)²`, so 1 means a miss of one noise sigma. The 8 residuals are averaged into one score per sample (`AGGREGATE = "mean"`). The first 109 samples score 0.
+
+**8. Thresholds and evaluation** (`evaluation/harness.py`, `evaluation/gate1.py`). Each threshold is set from the peak scores of calibrate's 500 healthy runs at the 2% budget (1% and 5% reported). Results are reported on val: recall within 15 s of onset, false alarms, transient false alarms, early alarms and delay.
+
+**9. Calibration and verdict.** `to_verdict` flags a run whose score crosses the threshold and ranks channels by average residual. Its confidence is a placeholder until calibration on D8.
 
 ## Decision log
 
@@ -129,3 +147,5 @@ Coming once the model exists (Nov 16).
 | 2026-11-18 | Command awareness (D7), set before any code. The throttle history (`WINDOW + horizon` samples, up to the target time) is split into 10-sample chunks, each mapped to 16 numbers by `Linear(10, 16)`, plus a learned position tag per chunk with `(WINDOW + horizon) // 10` rows, built from the horizon. The fusion block becomes `nn.TransformerDecoderLayer`: self-attention across the 8 channel tokens, then cross-attention from channel tokens (queries) to throttle tokens (keys and values), then feed-forward. `throttle_hist` is required, its length must be `WINDOW + horizon`, and the horizon must give whole chunks. The throttle is never masked | With horizon 10 the last chunk is exactly the forecast gap, so a commanded step there gets its own token. Position tags are needed because attention ignores order, and building them from the horizon keeps their shape matched to the weights when `load_run` rebuilds a model. "Decoder" is only PyTorch's name for self-attention plus cross-attention. The throttle stays visible because it's the one input always known and the main cause of the other channels' behavior: bearing heat follows speed², speed follows the throttle, so a worn bearing shows as heating beyond what the command explains. Evidence for the fix: on val at 2%, every one of D6's false alarms was transient (3.4%, 3.4%, 2.8%, all transient) |
 | 2026-11-18 | The D7 ablation is D6's three masked models and their committed results in `runs/gate1/metrics.json`, not a retrained model without commands. New runs are named with `_cmd` (`h10_mask0.25_cmd_seed0`) and `architecture()` records `command_aware`, so retraining can't overwrite D6's weights and a D6 model can't load into the new code. Training settings, splits and the evaluation method stay unchanged | D6's models are the same model without commands, evaluated on the same splits with the same thresholds, so retraining would only reproduce them. Their `model.pt` files aren't in git, so overwriting them would lose the weights behind the Gate 1 result. Adding cross-attention changes how the other weights are initialized, so seeds are compared as means over 3, not one to one |
 | 2026-11-18 | D7 exit test, set before the rerun. At the 2% budget on val, over 3 seeds: the mean transient false alarm rate is at most 1.6%, half of D6's 3.2%, and the mean recall is at least 9.4%, D6's lowest seed. Judged on the mean aggregate only, as chosen on D6. Max is printed but doesn't count. D6's values come from the committed `runs/gate1/metrics.json` | Every D6 false alarm was transient (overall and transient rates identical on every seed), so a model that reads the commands should remove most of them, not just some. "Below 3.2%" could pass by chance, since each seed's rate wobbles by roughly ±0.6 to ±0.9 points, and it would be weaker than the Gate 1 rerun's 3% cap per seed. For recall, the mean of 3 seeds is uncertain by about ±1.9 points (spread 3.3 over √3), so 9.4% means "not clearly worse" and is a number already on record |
+| 2026-11-18 | D7 exit test failed, and the Gate 1 rerun failed again. Mean transient false alarm rate 3.1% (bar at most 1.6%), mean recall 8.1% (bar at least 9.4%), false alarms 3.4%, 4.2% and 1.8% per seed (Gate 1 cap 3%). Bars stay as written. Command awareness stays in the model. Before another fix, a diagnostic outside the bar tests why | Every false alarm is still transient, and the sampled healthy peaks moved to startup, mostly on nozzle temp. Lower probe loss didn't shrink the tail. Val has been used for two rounds of decisions, so the next step is to understand the failure rather than fix and recheck again. Numbers in `runs/gate1_cmd/metrics.json` |
+| 2026-11-18 | Model and training settings, recorded here because they produced every Gate 1 result (in use since D5 and D6, unchanged on D7 apart from command awareness). Encoder: one shared MLP, 100 → 64 → 16 with GELU. Training: 500 healthy train runs, 10,000 steps, batch 256, Adam at 1e-3, channel masking at 0.25. Separate random streams for batches, masks and the probe. Probe loss on one fixed batch of 1,024 windows, before training and every 100 steps. Full description under Pipeline details | Small enough to train in about a minute, so 3 seeds per change stay cheap. 500 runs was the starting size, with 2,000 kept in reserve if the model underfit. It didn't: the D5 forecast bar passes, and seed 0's last 10 probe values only wobble between 6.85 and 7.7. Separate streams keep masked, unmasked and command-aware runs training on the same windows. The fixed probe makes `losses[0]` the true starting loss |
