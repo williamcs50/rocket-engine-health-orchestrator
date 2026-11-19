@@ -15,6 +15,7 @@ from evaluation.baselines import REDLINE_THRESHOLD, ConditionedZScore, ZScoreBas
 from evaluation.budget import CATCH_WINDOW_S, FA_BUDGET, FA_SECONDARY, REPORT_SPLIT, THRESHOLD_SPLIT
 from evaluation.calibration import PercentileConfidence, share_at_or_above, within_tolerance
 from evaluation.harness import score_run, summarize, threshold_at_budget, transient_mask
+from evaluation.score import REFERENCE_SEEDS, StandardizedScore, mean_residual
 from generator.splits import SPLITS, fault_for, make_run
 from model.forecaster import aggregate, residual_by_channel
 from model.train import RUNS_DIR, load_run
@@ -31,6 +32,12 @@ BUDGETS = (FA_BUDGET, *FA_SECONDARY)
 # Calibration exit test: the share of healthy val runs with confidence at least q must be within 3 points of 1 minus q
 CALIBRATION_QS = (0.8, 0.9, 0.95)
 CALIBRATION_TOLERANCE = 0.03
+# The Gate 1 bar, unchanged since D6: mean recall over seeds, every seed's recall, every seed's false alarm rate
+BAR_MEAN_RECALL = 0.05
+BAR_SEED_RECALL = 0.012
+BAR_FALSE_ALARM = 0.03
+# Lines summarized per seed: D6's two aggregates, plus the new standardized, differenced score
+SUMMARY = ("mean", "max", "std")
 
 
 def time_one_run() -> None:
@@ -47,7 +54,7 @@ def healthy_seeds(split: str, limit: int | None = None) -> list[int]:
     return seeds[:limit]
 
 
-def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None) -> tuple[dict, dict]:
+def calibrate_thresholds(models: dict, baselines: dict, std_scores: dict, limit: int | None = None) -> tuple[dict, dict]:
     """Pass 1: every detector's peak score on calibrate's healthy runs, then its thresholds and its calibration.
 
     Both come from the same peaks, built here in one place, so a detector's flag and confidence always agree.
@@ -64,6 +71,8 @@ def calibrate_thresholds(models: dict, baselines: dict, limit: int | None = None
             for how in AGGREGATES:
                 # Both aggregates come from the same residuals, so masked scoring runs once
                 peaks.setdefault(f"{name}/{how}", []).append(float(aggregate(r, how).max()))
+            # The new score from the same residuals, through mean_residual so the blind rows stay NaN
+            peaks.setdefault(f"{name}/std", []).append(float(std_scores[name].scores(mean_residual(r), run.throttle).max()))
         # The baselines need no model, so each is scored once per run
         for name, baseline in baselines.items():
             peaks.setdefault(name, []).append(float(baseline.scores(run).max()))
@@ -89,7 +98,9 @@ def peak_times(trained, n_runs: int = 10) -> None:
         print(f"  seed {seed}: {row * DT_S:5.1f} s, driven by {CHANNELS[int(r[row].argmax())]}, near a throttle change: {near_change}")
 
 
-def evaluate_val(models: dict, baselines: dict, thresholds: dict, limit: int | None = None) -> tuple[dict, dict]:
+def evaluate_val(
+    models: dict, baselines: dict, std_scores: dict, thresholds: dict, limit: int | None = None
+) -> tuple[dict, dict]:
     """Pass 2: every detector at every budget on val, plus each detector's healthy val peaks for calibration."""
     # (detector, budget) to [(is healthy, RunResult), ...]
     rows: dict[tuple[str, float], list] = {}
@@ -105,6 +116,7 @@ def evaluate_val(models: dict, baselines: dict, thresholds: dict, limit: int | N
             r = residual_by_channel(trained.model, trained.normalizer, run, masked=masked)
             for how in AGGREGATES:
                 scores[f"{name}/{how}"] = aggregate(r, how)
+            scores[f"{name}/std"] = std_scores[name].scores(mean_residual(r), run.throttle)
         for detector, s in scores.items():
             for b in BUDGETS:
                 result = score_run(s, run.throttle, thresholds[detector][b], run.fault)
@@ -159,13 +171,21 @@ def main(limit: int | None = None) -> None:
         # still uses D4's fixed 1.2%
         "zscore_fair": ConditionedZScore.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
     }
+    # The new score's healthy references, per model, on 500 train runs never trained on. Each run is scored once
+    std_scores = {
+        name: StandardizedScore.fit(
+            (make_run("train", s) for s in REFERENCE_SEEDS[:limit]),
+            lambda run, t=trained: mean_residual(residual_by_channel(t.model, t.normalizer, run, masked=True)),
+        )
+        for name, trained in models.items()
+    }
 
-    thresholds, calibrations = calibrate_thresholds(models, baselines, limit)
+    thresholds, calibrations = calibrate_thresholds(models, baselines, std_scores, limit)
     for detector, by_budget in thresholds.items():
         print(detector, {f"{b:.0%}": round(t, 3) for b, t in by_budget.items()})
 
     peak_times(models[MODELS[0]])
-    reports, healthy_val_peaks = evaluate_val(models, baselines, thresholds, limit)
+    reports, healthy_val_peaks = evaluate_val(models, baselines, std_scores, thresholds, limit)
 
     n_faulted = sum(fault_for(REPORT_SPLIT, s) is not None for s in SPLITS[REPORT_SPLIT][:limit])
     for b in BUDGETS:
@@ -181,28 +201,43 @@ def main(limit: int | None = None) -> None:
 
     masked_runs = [m for m in MODELS if models[m].config["mask_prob"] > 0]
     print(f"\nMasked seeds at {FA_BUDGET:.0%}, mean ± spread over {len(masked_runs)} seeds")
-    for how in AGGREGATES:
+    for how in SUMMARY:
         recall = [reports[(f"{m}/{how}", FA_BUDGET)].recall for m in masked_runs]
         fa = [reports[(f"{m}/{how}", FA_BUDGET)].false_alarm_rate for m in masked_runs]
-        # The D7 exit test is judged on the mean aggregate's line only. Max is reported, not judged
         transient = [reports[(f"{m}/{how}", FA_BUDGET)].transient_false_alarm_rate for m in masked_runs]
         print(
             f"  {how:4s} recall {np.mean(recall):.1%} ± {np.std(recall, ddof=1):.1%}, lowest seed {min(recall):.1%}, "
             f"highest false alarm {max(fa):.1%}, mean transient false alarm {np.mean(transient):.1%}"
         )
 
-    # Judged per seed on the mean aggregate, as logged on 2026-11-19
-    seeds_mean = [f"{m}/mean" for m in MODELS]
-    calibration = calibration_exit_test(calibrations, healthy_val_peaks, seeds_mean)
+    # Adoption: the new score is adopted only if its line passes all three Gate 1 conditions, per the D8 rule
+    std_recall = [reports[(f"{m}/std", FA_BUDGET)].recall for m in MODELS]
+    std_fa = [reports[(f"{m}/std", FA_BUDGET)].false_alarm_rate for m in MODELS]
+    conditions = {
+        # A tiny slack, since a mean of three shares that is exactly 5% can come out a hair under it in floating point
+        f"mean recall {np.mean(std_recall):.1%} at least {BAR_MEAN_RECALL:.0%}": np.mean(std_recall) >= BAR_MEAN_RECALL - 1e-9,
+        f"lowest seed {min(std_recall):.1%} above {BAR_SEED_RECALL:.1%}": min(std_recall) > BAR_SEED_RECALL,
+        f"highest false alarm {max(std_fa):.1%} at most {BAR_FALSE_ALARM:.0%}": max(std_fa) <= BAR_FALSE_ALARM,
+    }
+    adopted = all(conditions.values())
+    print(f"\nGate 1 on the new score (std line): {'PASS, adopted' if adopted else 'FAIL, not adopted'}")
+    for text, ok in conditions.items():
+        print(f"  {'yes' if ok else 'no '}  {text}")
+
+    # Judged per seed, on the scoring that goes to test: the new score if adopted, otherwise the mean aggregate
+    calibration = calibration_exit_test(calibrations, healthy_val_peaks, [f"{m}/{how}" for m in MODELS for how in ("mean", "std")])
     print(f"\nCalibration exit test: share of healthy {REPORT_SPLIT} runs with confidence at least q, target 1 minus q, within 3 points")
-    for detector in seeds_mean:
-        cells = [
-            f"q {q}: {calibration[f'{detector}@{q}']['share']:.1%} ({'pass' if calibration[f'{detector}@{q}']['passes'] else 'FAIL'})"
-            for q in CALIBRATION_QS
-        ]
-        print(f"  {detector:26s} " + "   ".join(cells))
-    passed = all(v["passes"] for v in calibration.values())
-    print(f"  Exit test: {'PASS' if passed else 'FAIL'}, judged per seed")
+    for how in ("mean", "std"):
+        for m in MODELS:
+            detector = f"{m}/{how}"
+            cells = [
+                f"q {q}: {calibration[f'{detector}@{q}']['share']:.1%} ({'pass' if calibration[f'{detector}@{q}']['passes'] else 'FAIL'})"
+                for q in CALIBRATION_QS
+            ]
+            print(f"  {detector:26s} " + "   ".join(cells))
+    judged = "std" if adopted else "mean"
+    passed = all(v["passes"] for k, v in calibration.items() if k.split("@")[0].endswith(f"/{judged}"))
+    print(f"  Exit test, judged on the {judged} line: {'PASS' if passed else 'FAIL'}, per seed")
 
     bias = bias_check(models[MODELS[0]], limit)
     print(
@@ -221,6 +256,7 @@ def main(limit: int | None = None) -> None:
             "reports": {f"{d}@{b:.0%}": asdict(rep) for (d, b), rep in reports.items()},
             "bias": bias,
             "calibration_exit_test": calibration,
+            "new_score": {"adopted": adopted, "conditions": {text: bool(ok) for text, ok in conditions.items()}},
         }
         (out / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         print(f"\nsaved {out / 'metrics.json'}")
