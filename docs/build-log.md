@@ -2,6 +2,69 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D8 · Thu Nov 19, 2026 · P4 calibration + P5 experiment
+
+**Exit test (calibration):** _pass or fail_. From the plan: the held-out nominal share above q is within ±3 points of 1 − q, for q = 0.8, 0.9 and 0.95. The P5 experiment (GRU against cross-attention) is dropped, per the Gate 1 bar.
+
+**Gate 1 rerun with the new score:** _pass, fail or not run_. Same bar, unchanged. Reported as optimistic, since this is val's third round of decisions.
+
+### Plan and cutoffs, set at 11:47 AM
+- Order: the fair z score fix first, then calibration, then the new score. The z score fix is independent of the model and the smallest piece, and the final table compares against it. Calibration is today's exit test, and its code works on any score. The new score is the largest and least certain, so it goes last, where running long can't cost tomorrow's test run anything
+- If the new score is adopted, calibration is rerun on it before tomorrow. That only means scoring calibrate's runs again
+- Adoption rule: the new score is adopted only if it passes Gate 1 on val, all three conditions. Otherwise tomorrow's test runs with D7's scoring (mean aggregate). If both fail Gate 1, the test still runs with D7's scoring and is reported as having failed Gate 1 on val. All 3 seeds go to test, reported per seed plus mean and spread. No seed is chosen
+- Calibration exit test: held out on val's 500 healthy runs today, and test's tomorrow. Counted per run, using each run's peak confidence, which matches how Gate 1 counts false alarms
+- Calibration starts by 1:30 PM. If temperature scaling hasn't met the ±3 point check by 3:00 PM, use the plan's fallback, the empirical quantile
+- The new score starts only after calibration and the z score fix. If it isn't built and evaluated by 5:30 PM, it's dropped, and tomorrow's test runs with D7's scoring
+
+### Diagnostic (predictions written on D7, run this morning)
+`python -m evaluation.checks slow_state`, model `h10_mask0.25_cmd_seed0`. Its count of seed 0's false alarm runs matches Gate 1's (17), so the script scores runs the same way Gate 1 did. It ran first in the base environment, then again in `reho` with identical output.
+
+Nozzle temp peak residual, ratio unmasked ÷ masked (smaller means unmasking helped more), first 10 healthy calibrate runs:
+
+| Seed | Startup ratio | Steady-state ratio | Both conditions |
+| --- | --- | --- | --- |
+| 200000 | 0.24 | 0.29 | yes |
+| 200002 | 0.05 | 0.06 | yes |
+| 200004 | 0.08 | 0.13 | yes |
+| 200006 | 0.28 | 0.22 | no |
+| 200008 | 0.13 | 0.15 | yes |
+| 200010 | 0.13 | 0.13 | no |
+| 200012 | 0.22 | 0.19 | no |
+| 200014 | 0.18 | 0.19 | yes |
+| 200016 | 0.07 | 0.15 | yes |
+| 200018 | 0.23 | 0.75 | yes |
+
+Seed 0's first false alarm times on healthy val runs, at its 2% mean threshold of 145.021: 1.1, 1.1, 1.1, 1.1, 1.1, 2.6, 3.1, 3.2, 3.2, 4.5, 4.6, 4.9, 5.0, 5.5, 13.2, 28.7 and 47.9 s.
+
+### Built
+- _
+
+### Decided
+- Next scoring fix: a standardized, differenced residual, fully specified in the decision log before any code. Judged by the Gate 1 bar, unchanged, with no separate exit test
+
+### Expected vs actual
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Diagnostic 1 (from D7): in at least 6 of 10 runs, nozzle temp's unmasked startup peak is at most half its masked startup peak, and unmasking shrinks the startup peak by a larger fraction than the steady-state peak. About 50% confident | Met as written, 7 of 10, but the margins on the control are negligible. In most runs the two ratios are nearly equal (0.05 against 0.06, 0.13 against 0.15, 0.18 against 0.19). Only 200018 (0.23 against 0.75) shows a clear difference | My own refutation clause said that if the steady-state peak shrinks just as much, the effect is general, and that's essentially what happened. Unmasking cuts nozzle temp's residual by 70 to 95% everywhere. The evidence points to a general masked nozzle problem, such as a per-run calibration offset invisible while the channel is hidden, not a startup-specific one. The masked startup peak is still larger than the masked steady peak in all 10 runs |
+| Diagnostic 2 (from D7): at least 12 of seed 0's 17 false alarm runs first alarm before 10 s. About 70% confident | Supported: 14 of 17 first alarm before 10 s. 5 of them alarm at 1.1 s, the first sample the model can score, 9 more between 2.6 and 5.5 s, and 3 mid-run | The false alarms are a startup problem, and almost a third fire at the very first forecast. This read val again, but only described a result already in hand |
+| With the standardized differenced score, each seed's val false alarm rate falls to at most 3%, so Gate 1 passes. Mean recall stays at least 8.1%, D7's value. Seed 1's false alarm rate, 4.2% on D7, drops the most of the three. About 40% confident, because my last two predictions about false alarms both missed and this score is untested (written before any code) | _ | _ |
+
+### Learned
+- A control compared with a strict "<" needs a margin, or noise decides the result. Next time, write how much lower counts, for example "at least 0.05 lower"
+- Masked nozzle temp is badly predicted at all times (steady-state peaks of 31 to 260, against 13 to 23 unmasked), and worst at startup. That fits a per-run offset the other channels can't reveal
+
+### Ledger
+- **Built by hand:** _
+- **Delegated, can explain:** _
+- **Delegated, not yet understood:** `slow_state` in `evaluation/checks.py`
+- **Moved:** _
+
+### Moved to tomorrow
+- _
+
+### Next
+_
+
 ## D7 · Wed Nov 18, 2026 · P3 command awareness
 
 **Exit test (D7):** failed on both conditions. Set before the rerun: at the 2% budget on val, over 3 seeds, the mean transient false alarm rate is at most 1.6% (half of D6's 3.2%), and the mean recall is at least 9.4% (D6's lowest seed). Judged on the mean aggregate only, the one chosen on D6, decided before the run. The max line is printed but doesn't count.
@@ -72,8 +135,8 @@ Expected output:
 | Expected | Actual | Why |
 | --- | --- | --- |
 | With cross attention, the mean transient false alarm rate over 3 seeds drops from 3.2% to about 1%, because the throttle step in the forecast gap now has its own token. Mean recall rises from 11.6% to about 14%, because the thresholds set by those spikes fall while the bearing signal stays the same size. Gate 1's 3% false alarm cap per seed is the uncertain part: once transients are gone, per-run bias on bearing temp may set the tail instead. I think Gate 1 passes, but I'm only about 60% sure (written before any D7 code) | Wrong on every part. The mean transient false alarm rate barely moved, 3.2% to 3.1%. Mean recall fell to 8.1%, with seeds at 17.6%, 1.4% and 5.2%. Gate 1 failed again on false alarms | I assumed the transient spikes came from not knowing the commands. The sampled healthy peaks moved to startup: on the same 10 calibrate runs, D6 had 1 of 10 under 8 s and 9 mid-run (10.8 to 49.5 s), while D7 has 8 of 10 at 2.8 to 6.8 s. The driving channel shifted too, from mostly fast channels on D6 (speed 3, feed pressure 3, chamber pressure 1, coolant flow 1, nozzle temp 2) to mostly slow thermal ones on D7 (nozzle temp 5, bearing temp 2, feed pressure 2, chamber pressure 1). That fits command awareness fixing what the throttle can explain and exposing what it can't. It's 10 runs on one seed, so a hint, not a finding. Peak times come from `peak_times` in each day's gate1 output: D7 with `python -m evaluation.gate1 --limit 20`, D6 from gate1.py at commit c2cf7fe. Lower average forecasting error also didn't shrink the tail: seeds 0 and 1 have nearly the same last-10 probe mean (7.18 and 7.40) but thresholds of 145 and 425 |
-| Diagnostic 1, written before running it. Both diagnostic predictions were written and reviewed by my tutor before the run, but committed only after it, so the commit timestamp doesn't prove the order. The tutor's review does. The text is unchanged from what was reviewed. Using `h10_mask0.25_cmd_seed0` and the first 10 healthy calibrate runs, I'll compare nozzle temp's peak residual masked against unmasked, both at startup (0 to 8 s) and in steady state (after 8 s, outside the transient window). I predict that in at least 6 of the 10 runs, the unmasked startup peak is at most half the masked startup peak, and unmasking shrinks the startup peak by a larger fraction than the steady-state peak. If fewer than 6 runs meet both conditions, the slow-state mechanism is not supported. If the startup peak halves but the steady-state peak shrinks just as much, the effect is general and not about slow state. I'm about 50% confident, because the mechanism is untested, the control makes it a stricter claim, and my last two predictions about where false alarms come from both missed | _ | _ |
-| Diagnostic 2, written before running it. For the same seed at its 2% mean threshold of 145.0 (from `runs/gate1_cmd/metrics.json`), I'll take the first alarm time of each of the 17 healthy val runs that raise a false alarm. I predict that at least 12 of the 17 first alarm before 10 s, during startup, and if fewer than 12 do, startup isn't the main source of false alarms. I'm about 70% confident, because 8 of 10 sampled healthy peaks already sat between 2.8 and 6.8 s, though those were peaks on calibrate rather than false alarms on val. This reads val again, but it only describes a result I already have and tunes nothing | _ | _ |
+| Diagnostic 1, written before running it. Both diagnostic predictions were written and reviewed by my tutor before the run, but committed only after it, so the commit timestamp doesn't prove the order. The tutor's review does. The text is unchanged from what was reviewed. Using `h10_mask0.25_cmd_seed0` and the first 10 healthy calibrate runs, I'll compare nozzle temp's peak residual masked against unmasked, both at startup (0 to 8 s) and in steady state (after 8 s, outside the transient window). I predict that in at least 6 of the 10 runs, the unmasked startup peak is at most half the masked startup peak, and unmasking shrinks the startup peak by a larger fraction than the steady-state peak. If fewer than 6 runs meet both conditions, the slow-state mechanism is not supported. If the startup peak halves but the steady-state peak shrinks just as much, the effect is general and not about slow state. I'm about 50% confident, because the mechanism is untested, the control makes it a stricter claim, and my last two predictions about where false alarms come from both missed | Run on D8 (Nov 19), see D8 | See D8 |
+| Diagnostic 2, written before running it. For the same seed at its 2% mean threshold of 145.0 (from `runs/gate1_cmd/metrics.json`), I'll take the first alarm time of each of the 17 healthy val runs that raise a false alarm. I predict that at least 12 of the 17 first alarm before 10 s, during startup, and if fewer than 12 do, startup isn't the main source of false alarms. I'm about 70% confident, because 8 of 10 sampled healthy peaks already sat between 2.8 and 6.8 s, though those were peaks on calibrate rather than false alarms on val. This reads val again, but it only describes a result I already have and tunes nothing | Run on D8 (Nov 19), see D8 | See D8 |
 
 ### Learned
 - Every D6 false alarm was transient. On each seed (17, 17 and 14 false alarm runs at 2%), every false alarm run alarmed within 5 s of a throttle change, a window covering 34.4% of a healthy run on average (measured over val's 500 healthy runs). Chance alone would rarely do that (about 0.344¹⁷ for one seed, as a rough illustration, since alarm timing isn't random), so the missing command input explains the false alarm failure. Reproduce the rates from `runs/gate1/metrics.json` and the 34.4% with `python -c "import numpy as np; from evaluation.harness import transient_mask; from generator.splits import SPLITS, fault_for, make_run; print(np.mean([transient_mask(make_run('val', s).throttle).mean() for s in SPLITS['val'] if fault_for('val', s) is None]))"`
