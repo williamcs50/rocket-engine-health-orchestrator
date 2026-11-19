@@ -140,6 +140,9 @@ class ProfileReference:
         # Variance as E[x²] − mean². Rounding can push it just below 0 when the mean is large next to the
         # spread, so it's clipped at 0 before the square root, here and per group below
         pooled_std = np.sqrt(np.maximum(squares.sum(axis=0) / n - pooled_mean**2, 0.0))
+        # With no spread at all, the floor would be 0 too and standardizing would divide by 0. Refuse instead
+        if (pooled_std == 0).any():
+            raise ValueError("a quantity with no spread can't be standardized")
 
         mean = np.empty_like(sums)
         std = np.empty_like(sums)
