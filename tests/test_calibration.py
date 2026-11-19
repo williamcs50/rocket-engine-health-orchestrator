@@ -53,6 +53,16 @@ def test_exit_test_share_equals_the_false_alarm_rate(q: float) -> None:
     assert share == pytest.approx(false_alarm_rate)
 
 
+def test_a_nan_peak_is_refused() -> None:
+    # searchsorted sorts NaN to the end, so a broken score would get confidence 1.0, certainty from a bug.
+    # The verdict should refuse instead
+    calibration = PercentileConfidence.fit(healthy_peaks())
+    with pytest.raises(ValueError):
+        calibration.confidence(np.nan)
+    with pytest.raises(ValueError):
+        calibration.confidence(np.array([100.0, np.nan]))
+
+
 def test_fit_needs_peaks() -> None:
     with pytest.raises(ValueError):
         PercentileConfidence.fit(np.array([]))
