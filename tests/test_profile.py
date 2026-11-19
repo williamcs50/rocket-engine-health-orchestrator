@@ -202,6 +202,13 @@ def test_reference_arrays_are_read_only() -> None:
             arr[0] = 0.0
 
 
+def test_fit_rejects_a_quantity_with_no_spread() -> None:
+    # If every value is the same, the pooled std is 0, so the std floor is 0 too and standardizing would divide
+    # by 0. Refuse to fit rather than return infinities later
+    with pytest.raises(ValueError):
+        ProfileReference.fit(healthy_runs(2), lambda run: np.full(N_STEPS, 4.0), min_samples=1)
+
+
 def test_fit_rejects_faulted_runs() -> None:
     faulty_seed = next(s for s in SPLITS["val"] if fault_for("val", s) is not None)
     with pytest.raises(ValueError):
