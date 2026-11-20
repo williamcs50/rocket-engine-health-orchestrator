@@ -2,6 +2,43 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D9 · Fri Nov 20, 2026 · Attribution and the one test run
+
+**Exit test (D9):** the final test table. The orchestrator against the redline and the z scores on recall at the budget, detection delay, transient false alarms and attribution overlap. No retraining after this.
+
+### Built
+
+### Decided
+- The verdict's ranked channels follow the residuals, not attention. Attention is reported separately. This is a logged deviation from the design doc and the napkin
+- Confidence is per run, from the peak, so the flag and confidence agree. Conditioning on the command comes only from the forecaster's throttle input, a stated limitation
+- The second fault type is cut, under cut list item 2. Bearing wear is the only fault
+- Attribution, set before test: top 3 overlap on residual and attention rise in the catch window, all faulted runs plus the caught runs, a healthy control, and uncertainty per seed and across seeds. No pass bar
+
+### Expected vs actual
+Written before the test run, from estimates I drafted with Claude and adjusted. The healthy control prediction is influenced by a glimpse of the val dry run (20 seeds per split), not by test.
+
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Judged mean line at 2% on test: mean recall about 9%, seeds about 15%, 2% and 6%. False alarms about 3%, 4% and 2%. Gate 1 fails on false alarms. About 75% confident | | |
+| Std line, for information: mean recall about 55%, false alarms 2.5 to 3.5%. Whether it clears the bar is a coin flip, about 50% | | |
+| Baselines at 2%: fair z score about 40%, D4 z score about 1%, redline 0%. About 80% confident | | |
+| Calibration exit test on the mean line fails, at q = 0.8 or 0.95 on at least one seed. About 75% confident | | |
+| All faulted runs: residual overlap about 55%, attention overlap about 40%, against 37.5% chance. About 60% confident | | |
+| Caught runs: residual overlap about 70%. About 55% confident | | |
+| Healthy control: both overlaps near chance, 35 to 45%. About 65% confident | | |
+
+### Learned
+
+### Ledger
+- **Built by hand:**
+- **Delegated, can explain:**
+- **Delegated, not yet understood:**
+- **Moved:**
+
+### Moved to tomorrow
+
+### Next
+
 ## D8 · Thu Nov 19, 2026 · P4 calibration + P5 experiment
 
 **Exit test (calibration):** failed, judged per seed on the mean line, since the new score wasn't adopted. The share of healthy val runs with confidence at least q must be within 3 points of 1 minus q, for q = 0.8, 0.9 and 0.95. The P5 experiment (GRU against cross-attention) is dropped, per the Gate 1 bar.
