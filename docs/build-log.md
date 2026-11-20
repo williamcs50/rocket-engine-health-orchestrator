@@ -4,9 +4,29 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D8 · Thu Nov 19, 2026 · P4 calibration + P5 experiment
 
-**Exit test (calibration):** _pass or fail_. From the plan: the held-out nominal share above q is within ±3 points of 1 − q, for q = 0.8, 0.9 and 0.95. The P5 experiment (GRU against cross-attention) is dropped, per the Gate 1 bar.
+**Exit test (calibration):** failed, judged per seed on the mean line, since the new score wasn't adopted. The share of healthy val runs with confidence at least q must be within 3 points of 1 minus q, for q = 0.8, 0.9 and 0.95. The P5 experiment (GRU against cross-attention) is dropped, per the Gate 1 bar.
 
-**Gate 1 rerun with the new score:** _pass, fail or not run_. Same bar, unchanged. Reported as optimistic, since this is val's third round of decisions.
+| Line, seed | q = 0.8 (target 20%) | q = 0.9 (target 10%) | q = 0.95 (target 5%) |
+| --- | --- | --- | --- |
+| mean, seed 0 | 22.4% | 12.6% | 8.6%, fails |
+| mean, seed 1 | 23.8%, fails | 10.4% | 6.0% |
+| mean, seed 2 | 20.8% | 9.0% | 3.8% |
+| std, seed 0 (shown for information) | 23.4%, fails | 14.4%, fails | 8.0% |
+| std, seed 1 (shown for information) | 22.8% | 14.0%, fails | 6.8% |
+| std, seed 2 (shown for information) | 20.6% | 9.0% | 6.2% |
+
+**Gate 1 rerun with the new score:** failed by one healthy run, so the new score is not adopted, and the Nov 20 test runs with D7's mean scoring. Same bar, unchanged. Reported as optimistic, since this is val's third round of decisions.
+
+| At the 2% budget | Seed 0 | Seed 1 | Seed 2 | Bar |
+| --- | --- | --- | --- | --- |
+| New score (std) recall | 51.4% | 64.0% | 58.8% | mean 58.1% ± 6.3%, at least 5%: passes |
+| New score false alarms | 3.2% | 2.6% | 2.8% | each at most 3%: fails on seed 0, 16 of 500 runs against 15 allowed |
+| New score transient false alarms | 3.0% | 1.8% | 2.2% | |
+| D7 mean recall (for comparison) | 17.6% | 1.4% | 5.2% | mean 8.1% |
+
+- Baselines at the 2% budget: redline 0.0%, D4 z score 1.2% at 0.6% false alarms, fair z score 39.6% at 2.4% false alarms.
+- The new score's thresholds are steady across seeds, 7.76 to 8.14 at 2%, against 145 to 425 for D7's mean line.
+- Reproduce with `python -m evaluation.gate1` (about 35 minutes, including the reference fits). Every number is in the committed `runs/gate1_d8/metrics.json`.
 
 ### Plan and cutoffs, set at 11:47 AM
 - Order: the fair z score fix first, then calibration, then the new score. The z score fix is independent of the model and the smallest piece, and the final table compares against it. Calibration is today's exit test, and its code works on any score. The new score is the largest and least certain, so it goes last, where running long can't cost tomorrow's test run anything
@@ -18,6 +38,7 @@ One entry per session, newest first. Full decision entries live in [architecture
 - The new score starts only after calibration and the z score fix. It must be built and tested by about 5:00 PM, so the 25 minute Gate 1 rerun finishes by 5:30 PM. If it isn't evaluated by 5:30 PM, it's dropped, and tomorrow's test runs with D7's scoring
 - Revised before lunch: the first version said calibration by 1:30 PM and the fallback at 3:00 PM, which left the z score fix only 30 minutes
 - Revised in the afternoon: the z score fix runs over, so calibration starts as soon as the conditioned z score is built, the fallback stays at 4:00 PM, and the new score keeps its 5:30 PM cutoff, so it will almost certainly be dropped
+- Revised again in the evening: calibration finished early, so the new score's cutoff moved from 5:30 PM to 8:30 PM, following my tutor's suggestion. This line was logged after the new score's code was written, not before
 
 ### Diagnostic (predictions written on D7, run this morning)
 `python -m evaluation.checks slow_state`, model `h10_mask0.25_cmd_seed0`. Its count of seed 0's false alarm runs matches Gate 1's (17), so the script scores runs the same way Gate 1 did. It ran first in the base environment, then again in `reho` with identical output.
@@ -41,33 +62,51 @@ Seed 0's first false alarm times on healthy val runs, at its 2% mean threshold o
 
 ### Built
 - The fair z score, done at 3:42 PM (commit e353e7a). `evaluation/profile.py` bins every sample by the throttle profile and fits a healthy reference with merging, fallback counts and a std floor. `ConditionedZScore` in `evaluation/baselines.py` standardizes each channel against it and combines channels as D4 does. It's wired into gate1.py as `zscore_fair`, next to D4's unchanged `zscore`. The full run fits both on the 2,000 train runs, simulating them twice, about a minute or two extra
+- Calibration (`evaluation/calibration.py`): a run's confidence is the share of calibrate's healthy peaks strictly below its own peak, one reference per detector. A NaN peak is refused, and a share exactly on the tolerance edge passes. `to_verdict` takes the confidence as a function, so `model/` imports nothing from `evaluation/`. The exit test prints in gate1.py
+- The new score (`evaluation/score.py`): `mean_residual` keeps the blind rows NaN, `lagged_difference` subtracts the mean over [t − 2000, t − 1500), and `StandardizedScore` fits a level and a difference reference per model on train seeds 500 to 999, scoring each run once. Blind rows are refused if filled in, and become −∞ last. `ProfileReference` refuses a quantity with no spread
+- gate1.py: baselines as a dict, the fair z score, a `/std` line per seed, the adoption verdict, the calibration exit test on both lines, results in `runs/gate1_d8/`
+- 209 fast tests pass
 
 ### Decided
 - Next scoring fix: a standardized, differenced residual, fully specified in the decision log before any code. Judged by the Gate 1 bar, unchanged, with no separate exit test
+- Calibration by percentile rank, chosen on purpose over temperature scaling, which can't go below 0.5 without an offset and answers "probably faulted"
+- Shutdown progress bins considered and dropped: shutdown is 4.1% of samples but 0.2% of the tail
+- The new score fails Gate 1 by one run and is not adopted. The rule holds, and nothing on val is retuned
+- On the Nov 20 test run, the std line is reported as a secondary line, labelled as failed on val and not adopted, shown for information. Decided before test exists
 
 ### Expected vs actual
 | Expected | Actual | Why |
 | --- | --- | --- |
 | Diagnostic 1 (from D7): in at least 6 of 10 runs, nozzle temp's unmasked startup peak is at most half its masked startup peak, and unmasking shrinks the startup peak by a larger fraction than the steady-state peak. About 50% confident | Met as written, 7 of 10, but the margins on the control are negligible. In most runs the two ratios are nearly equal (0.05 against 0.06, 0.13 against 0.15, 0.18 against 0.19). Only 200018 (0.23 against 0.75) shows a clear difference | My own refutation clause said that if the steady-state peak shrinks just as much, the effect is general, and that's essentially what happened. Unmasking cuts nozzle temp's residual by 70 to 95% everywhere. The evidence points to a general masked nozzle problem, such as a per-run calibration offset invisible while the channel is hidden, not a startup-specific one. The masked startup peak is still larger than the masked steady peak in all 10 runs |
 | Diagnostic 2 (from D7): at least 12 of seed 0's 17 false alarm runs first alarm before 10 s. About 70% confident | Supported: 14 of 17 first alarm before 10 s. 5 of them alarm at 1.1 s, the first sample the model can score, 9 more between 2.6 and 5.5 s, and 3 mid-run | The false alarms are a startup problem, and almost a third fire at the very first forecast. This read val again, but only described a result already in hand |
-| With the standardized differenced score, each seed's val false alarm rate falls to at most 3%, so Gate 1 passes. Mean recall stays at least 8.1%, D7's value. Seed 1's false alarm rate, 4.2% on D7, drops the most of the three. About 40% confident, because my last two predictions about false alarms both missed and this score is untested (written before any code) | _ | _ |
-| Calibration exit test, judged per seed. It fails, because seed 0 is already at 8.6% at q = 0.95 against 5 plus or minus 3. I think q = 0.8 and q = 0.9 also come out above 1 minus q on at least one seed each, since it's the same calibrate-to-val transfer problem as Gate 1. About 70% confident on 0.8 and 0.9 (written before any calibration code, knowing the q = 0.95 numbers from D7's Gate 1 run) | _ | _ |
+| With the standardized differenced score, each seed's val false alarm rate falls to at most 3%, so Gate 1 passes. Mean recall stays at least 8.1%, D7's value. Seed 1's false alarm rate, 4.2% on D7, drops the most of the three. About 40% confident, because my last two predictions about false alarms both missed and this score is untested (written before any code) | Two of three parts right. Gate 1 failed by one run: seed 0's false alarm rate is 3.2%, against at most 3%. Mean recall is 58.1%, far above 8.1%. Seed 1's false alarm rate dropped the most, 4.2% to 2.6%, while seed 0 went 3.4% to 3.2% and seed 2 rose 1.8% to 2.8% | The standardization did what it was meant to: steady thresholds across seeds and a sevenfold rise in recall. The false alarm transfer from calibrate to val still runs slightly high, now on seed 0 alone |
+| Calibration exit test, judged per seed. It fails, because seed 0 is already at 8.6% at q = 0.95 against 5 plus or minus 3. I think q = 0.8 and q = 0.9 also come out above 1 minus q on at least one seed each, since it's the same calibrate-to-val transfer problem as Gate 1. About 70% confident on 0.8 and 0.9 (written before any calibration code, knowing the q = 0.95 numbers from D7's Gate 1 run) | Matched. It fails, on seed 0 at q = 0.95 (8.6%) and seed 1 at q = 0.8 (23.8%). q = 0.8 is above 20% on all three seeds, and q = 0.9 above 10% on seeds 0 and 1 | The same calibrate-to-val transfer problem as Gate 1, at other levels. Seed 2 passes all three |
 
 ### Learned
 - A control compared with a strict "<" needs a margin, or noise decides the result. Next time, write how much lower counts, for example "at least 0.05 lower"
 - Masked nozzle temp is badly predicted at all times (steady-state peaks of 31 to 260, against 13 to 23 unmasked), and worst at startup. That fits a per-run offset the other channels can't reveal
+- The fair baseline changes the story. Conditioned only on the throttle profile, with no learning, the z score catches 39.6% at 2.4% false alarms, against D4's 1.2%. D7's model (8.1%) loses to it badly. The std score (58.1%) beats it, which hints the model adds value once scored properly, but that's a hint, not a claim, since the std score wasn't adopted and the false alarm rates differ
+- A conditioned baseline with no learning went from 1.2% to 39.6%, and the same D7 models went from 8.1% to 58.1% with only a scoring change. Most of what held the model back was scoring (startup and per-run offsets), not architecture
+- A 20 run quick check can't judge calibration: with 10 healthy runs a share moves in steps of 10%, so q = 0.95 can only read 0% or 10%
+- Holding a pre-registered rule is easiest to justify and hardest to do when a result misses by one run
 
 ### Ledger
-- **Built by hand:** _
-- **Delegated, can explain:** _
-- **Delegated, not yet understood:** `slow_state` in `evaluation/checks.py`
-- **Moved:** _
+- **Built by hand:** none. `profile.py` was typed from code I was given, which counts as delegated until I can explain it
+- **Delegated, can explain:** none
+- **Delegated, not yet understood:** `slow_state` in `evaluation/checks.py`, `evaluation/profile.py`, `ConditionedZScore`, `evaluation/calibration.py`, `evaluation/score.py`, the `to_verdict` change, the gate1.py wiring, and today's tests: `tests/test_profile.py`, `tests/test_score.py`, `tests/test_calibration.py`, the conditioned z score tests in `tests/test_baselines.py` and the verdict confidence test in `tests/test_model.py`
+- **Moved:** none
 
 ### Moved to tomorrow
-- _
+- Walk through everything in "not yet understood", starting with `profile.py`. The backlog grew today, so Saturday's review is mostly walkthroughs
+- Attention by hand (planned for Sat Nov 14, never done): Saturday's review, or logged as cut
+- D5's weekly review blanks and the site build log, both still open
 
 ### Next
-_
+Fri Nov 20, D9, in order:
+1. A 15 minute reread of tonight's diffs, fresh
+2. The test run script, with both guards: the plan's flag in the split loader, and refusing to run if test results already exist. Every detector: D7 mean (primary, judged), std (secondary, labelled), redline, D4 z score and the fair z score
+3. Decide what attribution means before opening test: residual top k against the ground truth channels, and how attention weights are read from the decoder, or state that attention attribution is dropped
+4. The one test run
 
 ## D7 · Wed Nov 18, 2026 · P3 command awareness
 
