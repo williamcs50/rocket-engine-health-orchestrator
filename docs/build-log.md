@@ -4,40 +4,80 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D9 · Fri Nov 20, 2026 · Attribution and the one test run
 
-**Exit test (D9):** the final test table. The orchestrator against the redline and the z scores on recall at the budget, detection delay, transient false alarms and attribution overlap. No retraining after this.
+**Exit test (D9):** met. The final test table is complete, from one test run on commit 47cce60, with a clean working tree and the model hashes recorded. Against the Gate 1 bar, which still applies, the judged line fails by one healthy run. Reported as the clean result: test was opened once, with every decision committed beforehand.
+
+| At the 2% budget on test | Seed 0 | Seed 1 | Seed 2 | Mean |
+| --- | --- | --- | --- | --- |
+| Orchestrator, D7 mean (judged) recall | 17.6% | 1.6% | 2.8% | 7.3% ± 8.9% |
+| Judged false alarms | 2.6% | 3.2%, fails | 2.2% | |
+| Orchestrator, std (failed Gate 1 on val by one false alarm, not adopted, shown for information) recall | 52.0% | 64.0% | 58.6% | 58.2% ± 6.0% |
+| Std false alarms | 2.4% | 2.8% | 3.0% | |
+
+- Baselines at 2%: fair z score 35.2% at 2.8% false alarms, D4 z score 0.2% at 2.4%, redline 0.2% at 0.0%.
+- Every false alarm on the judged line is transient, as on val. Mean delay is 8.6 to 14.1 s on the judged line, and 11.6 to 11.7 s on the std line.
+- The calibration exit test passes on every seed and both lines. The mean line's worst cell is seed 1 at q = 0.8, 21.6% against 20%.
+- Attribution, top 3 overlap against 37.5% chance:
+
+| Population | Residual | Attention | Agreement |
+| --- | --- | --- | --- |
+| All faulted runs | 61.2% ± 2.9% | 40.9% ± 12.4% | 41.3% ± 5.4% |
+| Caught runs (n 88, 8, 14) | 56.5% ± 10.4% | 56.1% ± 14.4% | 43.7% ± 7.6% |
+| Healthy control | 41.9% ± 1.0% | 43.1% ± 12.1% | 44.6% ± 4.9% |
+
+- Every number, including the 3,000 per-run attribution rows, is in the committed `runs/test/metrics.json`. The run can't be repeated, because the `started` marker refuses a second one.
 
 ### Built
+- The test split guard. `make_run` refuses test with `PermissionError` outside `open_test_split()`, a context manager that relocks even after an error. `claim_test_run` writes a `started` marker before any test run is simulated, and refuses if the marker or results already exist
+- `attention_by_channel` in `model/forecaster.py`: the self-attention each channel receives, from one unmasked pass. Hooks switch the weights on and are always removed afterwards
+- `evaluation/attribution.py`: the rise, top 3, overlap, a 95% bootstrap interval and the healthy control's borrowed onset
+- gate1.py: `fit_detectors` and `detector_scores` shared with the test script. `--limit 20` output is identical before and after
+- `evaluation/final.py`: the D8 threshold check, provenance (commit, clean tree, model hashes), claim and then open test, one pass with attribution per run and model, and a val dry run that saves nothing
+- Tests before code for the guards, the attribution and most of the script. The three tests on `main` were written after its code. 248 fast tests pass
+- The one test run, about 18 minutes for the test pass after fitting and calibrate
 
 ### Decided
 - The verdict's ranked channels follow the residuals, not attention. Attention is reported separately. This is a logged deviation from the design doc and the napkin
 - Confidence is per run, from the peak, so the flag and confidence agree. Conditioning on the command comes only from the forecaster's throttle input, a stated limitation
 - The second fault type is cut, under cut list item 2. Bearing wear is the only fault
 - Attribution, set before test: top 3 overlap on residual and attention rise in the catch window, all faulted runs plus the caught runs, a healthy control, and uncertainty per seed and across seeds. No pass bar
+- The test result is held under the adoption rule. The std line clears the bar on test but isn't adopted
+- The std score is pre-registered for a fresh split, `test2`, after v1, with the same bar and the split opened once
 
 ### Expected vs actual
 Written before the test run, from estimates I drafted with Claude and adjusted. The healthy control prediction is influenced by a glimpse of the val dry run (20 seeds per split), not by test.
 
 | Expected | Actual | Why |
 | --- | --- | --- |
-| Judged mean line at 2% on test: mean recall about 9%, seeds about 15%, 2% and 6%. False alarms about 3%, 4% and 2%. Gate 1 fails on false alarms. About 75% confident | | |
-| Std line, for information: mean recall about 55%, false alarms 2.5 to 3.5%. Whether it clears the bar is a coin flip, about 50% | | |
-| Baselines at 2%: fair z score about 40%, D4 z score about 1%, redline 0%. About 80% confident | | |
-| Calibration exit test on the mean line fails, at q = 0.8 or 0.95 on at least one seed. About 75% confident | | |
-| All faulted runs: residual overlap about 55%, attention overlap about 40%, against 37.5% chance. About 60% confident | | |
-| Caught runs: residual overlap about 70%. About 55% confident | | |
-| Healthy control: both overlaps near chance, 35 to 45%. About 65% confident | | |
+| Judged mean line at 2% on test: mean recall about 9%, seeds about 15%, 2% and 6%. False alarms about 3%, 4% and 2%. Gate 1 fails on false alarms. About 75% confident | Mean recall 7.3%, seeds 17.6%, 1.6% and 2.8%. False alarms 2.6%, 3.2% and 2.2%. Gate 1 fails on false alarms, seed 1 by one run | The same model and thresholds as val, so close to val's numbers. Only one seed is over this time. My 9% mean didn't match my own seed guesses, which average 7.7% |
+| Std line, for information: mean recall about 55%, false alarms 2.5 to 3.5%. Whether it clears the bar is a coin flip, about 50% | Recall 58.2% plus or minus 6.0%, false alarms 2.4%, 2.8% and 3.0%. It clears the bar | Nearly the same as val (58.1%) on an independent split. The coin flip landed on passes, with seed 2 exactly at the limit |
+| Baselines at 2%: fair z score about 40%, D4 z score about 1%, redline 0%. About 80% confident | Fair z score 35.2%, D4 z score 0.2%, redline 0.2% | Close. The fair z score is a few points below val's 39.6%, and the redline caught one run |
+| Calibration exit test on the mean line fails, at q = 0.8 or 0.95 on at least one seed. About 75% confident | Passes on every seed and both lines | Wrong. Calibrate transfers to test within 3 points, so val's failure was at least partly that split's sample. One split isn't enough to call a gap systematic |
+| All faulted runs: residual overlap about 55%, attention overlap about 40%, against 37.5% chance. About 60% confident | Residual 61.2%, attention 40.9% | Attention right, residual 6 points higher. Residual attribution clearly follows the fault, and attention matches its healthy control |
+| Caught runs: residual overlap about 70%. About 55% confident | Residual 56.5%, seeds 66.7%, 45.8% and 57.1% on 88, 8 and 14 runs | Wrong. Seed 0, with 88 runs, is near my guess. The other two have too few runs for their means to say much |
+| Healthy control: both overlaps near chance, 35 to 45%. About 65% confident | Residual 41.9%, attention 43.1% | Right. Both are a little above chance with no fault, a mild preference for the wear channels. On seed 1, attention reads 57% on healthy runs |
 
 ### Learned
+- Holding the rule cost the pass. The std line cleared the bar on test but wasn't adopted. The same result on two independent splits, 58.1% and 58.2%, is stronger evidence than one pass would have been
+- The healthy control is what made attribution readable. Seed 1's attention looked well above chance on faulted runs (55.2%) until the control showed 57.0% with no fault at all
+- In a masked forecaster, attention shows routing for prediction, not anomaly. Residuals beat their control by 19 points, and attention doesn't beat its control at all
+- A calibration failure on one split can be that split's sample. Val failed and test passed with the same reference
+- Checking a mean against its parts takes seconds and should happen before a prediction is committed
 
 ### Ledger
-- **Built by hand:**
-- **Delegated, can explain:**
-- **Delegated, not yet understood:**
-- **Moved:**
+- **Built by hand:** none
+- **Delegated, can explain:** none yet. I walked through every file today, but the questions are still to come
+- **Delegated, not yet understood:** the split guard and `claim_test_run`, `attention_by_channel`, `evaluation/attribution.py`, the gate1 refactor, `evaluation/final.py`, and today's tests in `tests/test_splits.py`, `tests/test_attribution.py` and `tests/test_final.py`. D8's items are still here too
+- **Moved:** none
 
 ### Moved to tomorrow
+- The understanding questions for D8 and D9, so items can move to "can explain"
+- D5's weekly review blanks and the site build log
 
 ### Next
+Sat Nov 21, review, 9:00 AM to 12:30 PM, in order:
+1. Understanding questions on D8 and D9, moving items to "can explain"
+2. D5's review blanks and the site build log
+3. Prep for D10: the README results table from `runs/test/metrics.json`, and which real runs to export for the demo
 
 ## D8 · Thu Nov 19, 2026 · P4 calibration + P5 experiment
 
@@ -135,7 +175,6 @@ Seed 0's first false alarm times on healthy val runs, at its 2% mean threshold o
 
 ### Moved to tomorrow
 - Walk through everything in "not yet understood", starting with `profile.py`. The backlog grew today, so Saturday's review is mostly walkthroughs
-- Attention by hand (planned for Sat Nov 14, never done): Saturday's review, or logged as cut
 - D5's weekly review blanks and the site build log, both still open
 
 ### Next
