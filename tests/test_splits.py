@@ -3,7 +3,7 @@ from itertools import combinations
 import numpy as np
 import pytest
 
-from generator.splits import SPLITS, fault_for, make_run
+from generator.splits import SPLITS, fault_for, make_run, open_test_split
 
 def test_split_seeds_never_overlap() -> None:
     assert set(SPLITS) == {"train", "val", "calibrate", "test"}
@@ -21,7 +21,8 @@ def test_val_calibrate_test_contain_faults(split: str) -> None:
     assert any(f is None for f in faults), f"{split} has no healthy seeds"
     assert any(f is not None for f in faults), f"{split} has no faulted seeds"
 
-@pytest.mark.parametrize("split", ["train", "val", "calibrate", "test"])
+# Test is left out, since only the D9 script may simulate it. Val and calibrate run the same code
+@pytest.mark.parametrize("split", ["train", "val", "calibrate"])
 def test_split_runs_are_reproducible(split: str) -> None:
     for seed in SPLITS[split][:2]:
         a, b = make_run(split, seed), make_run(split, seed)
@@ -29,8 +30,43 @@ def test_split_runs_are_reproducible(split: str) -> None:
         assert a.fault == b.fault == fault_for(split, seed)
 
 def test_make_run_rejects_seed_from_another_split() -> None:
+    # Val, not test, so this checks the seed range and not the test split guard
     with pytest.raises(ValueError):
-        make_run("test", SPLITS["train"][0])
+        make_run("val", SPLITS["train"][0])
+
+
+# The test split guard
+
+def test_test_split_is_locked_by_default() -> None:
+    with pytest.raises(PermissionError):
+        make_run("test", SPLITS["test"][0])
+
+
+def test_test_split_opens_inside_the_context() -> None:
+    with open_test_split():
+        run = make_run("test", SPLITS["test"][0])
+    assert run.fault == fault_for("test", SPLITS["test"][0])
+
+
+def test_test_split_locks_again_after_the_context() -> None:
+    with open_test_split():
+        pass
+    with pytest.raises(PermissionError):
+        make_run("test", SPLITS["test"][0])
+
+
+def test_test_split_locks_again_after_an_error_inside() -> None:
+    # A crash mid-run must not leave the split open for whatever runs next
+    with pytest.raises(RuntimeError):
+        with open_test_split():
+            raise RuntimeError("crash mid-run")
+    with pytest.raises(PermissionError):
+        make_run("test", SPLITS["test"][0])
+
+
+def test_test_labels_stay_readable_without_the_context() -> None:
+    # Labels come from the seed alone, with no simulated data, so fault_for isn't guarded
+    assert fault_for("test", SPLITS["test"][1]) is not None
 
 def test_fault_for_rejects_unknown_split() -> None:
     with pytest.raises(ValueError):
