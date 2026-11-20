@@ -98,6 +98,46 @@ def peak_times(trained, n_runs: int = 10) -> None:
         print(f"  seed {seed}: {row * DT_S:5.1f} s, driven by {CHANNELS[int(r[row].argmax())]}, near a throttle change: {near_change}")
 
 
+def fit_detectors(models: dict, limit: int | None = None) -> tuple[dict, dict]:
+    """The baselines on train, and each model's std score references on train runs it never saw. As on D8."""
+    # Train only, as in D4. A quick check fits on fewer runs, since only the wiring is being tested
+    baselines = {
+        "zscore": ZScoreBaseline.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
+        # The fair baseline for the Nov 20 test table. No training, so all 2,000 train runs. The Gate 1 bar
+        # still uses D4's fixed 1.2%
+        "zscore_fair": ConditionedZScore.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
+    }
+    # The new score's healthy references, per model, on 500 train runs never trained on. Each run is scored once
+    std_scores = {
+        name: StandardizedScore.fit(
+            (make_run("train", s) for s in REFERENCE_SEEDS[:limit]),
+            lambda run, t=trained: mean_residual(residual_by_channel(t.model, t.normalizer, run, masked=True)),
+        )
+        for name, trained in models.items()
+    }
+    return baselines, std_scores
+
+
+def detector_scores(run, models: dict, baselines: dict, std_scores: dict) -> tuple[dict, dict]:
+    """Every detector's per-sample scores on one run, and each model's residuals. Shared with the test run script.
+
+    Masked scoring is the slow part, so each model scores the run once and all three of its lines reuse it.
+    """
+    scores = {"redline": redline_scores(run)}
+    for name, baseline in baselines.items():
+        scores[name] = baseline.scores(run)
+    residuals = {}
+    for name, trained in models.items():
+        masked = trained.config["mask_prob"] > 0
+        r = residual_by_channel(trained.model, trained.normalizer, run, masked=masked)
+        residuals[name] = r
+        for how in AGGREGATES:
+            scores[f"{name}/{how}"] = aggregate(r, how)
+        # Through mean_residual, so the blind rows stay NaN
+        scores[f"{name}/std"] = std_scores[name].scores(mean_residual(r), run.throttle)
+    return scores, residuals
+
+
 def evaluate_val(
     models: dict, baselines: dict, std_scores: dict, thresholds: dict, limit: int | None = None
 ) -> tuple[dict, dict]:
@@ -108,15 +148,7 @@ def evaluate_val(
     healthy_val_peaks: dict[str, list[float]] = {}
     for seed in SPLITS[REPORT_SPLIT][:limit]:
         run = make_run(REPORT_SPLIT, seed)
-        scores = {"redline": redline_scores(run)}
-        for name, baseline in baselines.items():
-            scores[name] = baseline.scores(run)
-        for name, trained in models.items():
-            masked = trained.config["mask_prob"] > 0
-            r = residual_by_channel(trained.model, trained.normalizer, run, masked=masked)
-            for how in AGGREGATES:
-                scores[f"{name}/{how}"] = aggregate(r, how)
-            scores[f"{name}/std"] = std_scores[name].scores(mean_residual(r), run.throttle)
+        scores, _ = detector_scores(run, models, baselines, std_scores)
         for detector, s in scores.items():
             for b in BUDGETS:
                 result = score_run(s, run.throttle, thresholds[detector][b], run.fault)
@@ -164,21 +196,7 @@ def bias_check(trained, limit: int | None = None) -> dict:
 
 def main(limit: int | None = None) -> None:
     models = {name: load_run(RUNS_DIR / name) for name in MODELS}
-    # Train only, as in D4. A quick check fits on fewer runs, since only the wiring is being tested
-    baselines = {
-        "zscore": ZScoreBaseline.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
-        # The fair baseline for the Nov 20 test table. No training, so all 2,000 train runs. The Gate 1 bar
-        # still uses D4's fixed 1.2%
-        "zscore_fair": ConditionedZScore.fit(make_run("train", s) for s in SPLITS["train"][:limit]),
-    }
-    # The new score's healthy references, per model, on 500 train runs never trained on. Each run is scored once
-    std_scores = {
-        name: StandardizedScore.fit(
-            (make_run("train", s) for s in REFERENCE_SEEDS[:limit]),
-            lambda run, t=trained: mean_residual(residual_by_channel(t.model, t.normalizer, run, masked=True)),
-        )
-        for name, trained in models.items()
-    }
+    baselines, std_scores = fit_detectors(models, limit)
 
     thresholds, calibrations = calibrate_thresholds(models, baselines, std_scores, limit)
     for detector, by_budget in thresholds.items():
