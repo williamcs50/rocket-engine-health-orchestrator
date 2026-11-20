@@ -118,6 +118,47 @@ def forecast_run(model: Forecaster, normalizer: Normalizer, run: Run, masked: bo
     return out
 
 
+@torch.no_grad()
+def attention_by_channel(model: Forecaster, normalizer: Normalizer, run: Run) -> np.ndarray:
+    """(N_STEPS, 8): the self-attention each channel receives, from one unmasked pass. NaN where no forecast exists.
+
+    Averaged over heads, querying channels and blocks. Unmasked, since in a masked pass the scored channel's own
+    token is hidden. Decision log, 2026-11-20 (attribution).
+    """
+    x = normalizer.transform(run.sensors)
+    windows, throttle_hist, _ = make_windows(x, run.throttle, model.horizon)
+    # Self-attention only. Cross-attention goes to the command tokens, so it can't rank channels
+    layers = [layer.self_attn for layer in model.fusion.layers]
+    captured: list[list[torch.Tensor]] = [[] for _ in layers]
+
+    # The decoder layer asks for no weights, so this switches them on for the call, averaged over heads
+    def ask_for_weights(module, args, kwargs):
+        kwargs["need_weights"] = True
+        kwargs["average_attn_weights"] = True
+        return args, kwargs
+
+    handles = []
+    for i, attn in enumerate(layers):
+        handles.append(attn.register_forward_pre_hook(ask_for_weights, with_kwargs=True))
+        # output is (attended values, weights), the weights shaped (batch, 8 queries, 8 keys)
+        handles.append(attn.register_forward_hook(lambda module, args, output, i=i: captured[i].append(output[1])))
+    try:
+        for lo in range(0, len(windows), SCORE_BATCH):
+            w = torch.from_numpy(windows[lo:lo + SCORE_BATCH].astype(np.float32))
+            th = torch.from_numpy(throttle_hist[lo:lo + SCORE_BATCH].astype(np.float32))
+            model(w, th)
+    finally:
+        # Always removed, so no later forecast carries the hooks
+        for h in handles:
+            h.remove()
+
+    # (n, queries, keys) averaged over queries gives what each key channel receives, then averaged over blocks
+    received = np.mean([torch.cat(c).mean(dim=1).numpy() for c in captured], axis=0)
+    out = np.full((len(x), len(CHANNELS)), np.nan)
+    out[WINDOW - 1 + model.horizon:] = received
+    return out
+
+
 def residual_by_channel(model: Forecaster, normalizer: Normalizer, run: Run, masked: bool = True) -> np.ndarray:
     """(N_STEPS, 8): each channel's squared miss in noise-floor units. NaN where there's no forecast."""
     x = normalizer.transform(run.sensors)
