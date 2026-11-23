@@ -15,7 +15,7 @@ from evaluation.score import StandardizedScore, mean_residual
 from generator.engine import WEAR_CHANNELS
 from generator.splits import SPLITS, fault_for, make_run
 from model.data import Normalizer
-from model.forecaster import Forecaster, aggregate, residual_by_channel
+from model.forecaster import Forecaster, aggregate, residual_by_channel, to_verdict
 from model.train import RUNS_DIR, TrainResult
 
 # The model's first forecast. Rows before it have no forecast
@@ -299,3 +299,20 @@ def test_the_test2_run_checks_then_claims_then_opens_test2(monkeypatch: pytest.M
     (tmp_path / "test2").mkdir()
     final.main(split="test2")
     assert calls == ["check", "claim", "open test2"]
+
+
+def test_the_verdict_flags_exactly_as_test2_scored() -> None:
+    # The std score through to_verdict must be the same per-sample score detector_scores gave test2
+    runs = [make_run(REPORT_SPLIT, s) for s in SPLITS[REPORT_SPLIT][:2]]
+    healthy = [r for r in runs if r.fault is None]
+    normalizer = Normalizer.fit(healthy)
+    model = Forecaster().eval()
+    std = StandardizedScore.fit(healthy, lambda run: mean_residual(residual_by_channel(model, normalizer, run)), min_samples=1)
+    run = runs[1]
+    peak = std.scores(mean_residual(residual_by_channel(model, normalizer, run)), run.throttle).max()
+    np.testing.assert_array_equal(
+        std.verdict_score(residual_by_channel(model, normalizer, run), run),
+        std.scores(mean_residual(residual_by_channel(model, normalizer, run)), run.throttle),
+    )
+    assert to_verdict(model, normalizer, run, peak * 0.99, lambda p: 0.5, score=std.verdict_score).flag is True
+    assert to_verdict(model, normalizer, run, peak * 1.01, lambda p: 0.5, score=std.verdict_score).flag is False

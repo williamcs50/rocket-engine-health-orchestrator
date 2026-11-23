@@ -186,6 +186,42 @@ def test_verdict_and_scores_use_the_same_aggregate(masked: bool, how: str) -> No
     assert to_verdict(model, normalizer, run, threshold=peak * 0.99, confidence=fixed_confidence, masked=masked, how=how).flag is True
     assert to_verdict(model, normalizer, run, threshold=peak * 1.01, confidence=fixed_confidence, masked=masked, how=how).flag is False
 
+def test_verdict_flags_on_a_score_passed_in() -> None:
+    # The v1 scoring is the std score, which lives in evaluation/. It comes in as a function of the residuals and
+    # the run, so model/ still imports nothing from evaluation/ (decision log, 2026-11-23, test2 result)
+    model = Forecaster(horizon=HORIZON).eval()
+    normalizer = Normalizer.fit([constant_run(1.0), constant_run(3.0)])
+    run = make_run(REPORT_SPLIT, SPLITS[REPORT_SPLIT][0])
+    seen = []
+
+    def score(r: np.ndarray, scored: Run) -> np.ndarray:
+        seen.append((r.shape, scored is run))
+        return np.full(N_STEPS, 5.0)
+
+    assert to_verdict(model, normalizer, run, threshold=4.9, confidence=fixed_confidence, score=score).flag is True
+    assert to_verdict(model, normalizer, run, threshold=5.0, confidence=fixed_confidence, score=score).flag is False
+    # It receives the per-channel residuals and the run itself
+    assert seen[0] == ((N_STEPS, len(CHANNELS)), True)
+
+
+def test_verdict_asks_the_calibration_about_the_passed_in_scores_peak() -> None:
+    model = Forecaster(horizon=HORIZON).eval()
+    normalizer = Normalizer.fit([constant_run(1.0), constant_run(3.0)])
+    run = make_run(REPORT_SPLIT, SPLITS[REPORT_SPLIT][0])
+    asked = []
+
+    def confidence(p: float) -> float:
+        asked.append(p)
+        return 0.5
+
+    # Blind rows at -inf, as the std score gives them, must never be the peak
+    scores = np.full(N_STEPS, 2.0)
+    scores[:109] = -np.inf
+    scores[3000] = 7.0
+    to_verdict(model, normalizer, run, threshold=10.0, confidence=confidence, score=lambda r, scored: scores)
+    assert asked == [7.0]
+
+
 def test_verdict_confidence_comes_from_the_calibration() -> None:
     # The verdict asks the calibration about the run's peak score and passes the answer on as a plain float,
     # since the Verdict contract round-trips through JSON
