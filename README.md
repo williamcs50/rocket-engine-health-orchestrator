@@ -8,9 +8,9 @@ Engine monitoring usually checks each sensor against its own redline. A degradin
 
 ## The approach
 
-A reduced-order physics model generates engine telemetry and injects faults as physical changes, so their signatures emerge across channels on their own. Each of the 8 sensor channels is encoded separately, and an attention layer weighs the channels against each other and against the throttle command. The model is trained only on normal runs to forecast what each channel should do next, and when reality departs from the forecast, that gap becomes the anomaly score. The output is an advisory verdict: a flag, a calibrated confidence and the channels that mattered most. It only advises, and redline protection keeps all authority.
+A reduced-order physics model generates engine telemetry and injects faults as physical changes, so their signatures emerge across channels on their own. Each of the 8 sensor channels is encoded separately, and an attention layer weighs the channels against each other and against the throttle command. The model is trained only on normal runs to forecast what each channel should do next, and when reality departs from the forecast, that gap is compared with the same run's recent past and with healthy runs at the same point in the throttle profile, and the result is the anomaly score. The output is an advisory verdict: a flag, a calibrated confidence and the channels that mattered most. It only advises, and redline protection keeps all authority.
 
-> **Status:** v1 in progress (Nov 10 to 23, 2026). Model trained and evaluated on validation. Gate 1 not yet passed: recall clears its bar, but false alarms on val exceed the 3% cap. Next: diagnosing startup transients. Daily log: [build log](docs/build-log.md) · [two-week plan](docs/two-week-plan.md)
+> **Status:** v1 shipped Nov 23, 2026. The orchestrator passes its Gate 1 bar on a pre-registered held-out split: 58.0% of faults caught within 15 s of onset, with false alarms at most 2.6% per seed, against 35.0% for the best baseline and 0% for redlines. Daily log: [build log](docs/build-log.md) · [two-week plan](docs/two-week-plan.md)
 
 ## Installation
 
@@ -36,24 +36,37 @@ The slow exit tests train a model and take about 90 seconds: `pytest -m slow`.
 
 ## Quickstart
 
-Interim, until v1. Train one model and evaluate it against the baselines:
-
 ```bash
-# Train one model, about a minute. Saved to runs/h10_mask0.25_cmd_seed0/
-python -m model.train --seed 0
-
-# Evaluate on val against the redline and z score, about 25 minutes.
-# It expects all three seeds (--seed 0, 1 and 2). Add --limit 20 for a quick check
+# The three trained models are committed, so no training is needed.
+# Reproduce the val results, about 35 minutes. It rewrites runs/gate1_d8/metrics.json,
+# so `git diff` afterward shows whether every number matched
 python -m evaluation.gate1
 ```
 
+The test and test2 results can't be rerun. Each held-out split is locked in code and opens once. Their results are in `runs/test/metrics.json` and `runs/test2/metrics.json`. Retraining (`python -m model.train --seed 0`) gives close but not identical weights, and it overwrites the committed model in that folder.
+
 ## Results
 
-Coming in v1.
+At the 2% false alarm budget (at most 10 of 500 healthy runs alarm on calibrate). Recall is the share of faults caught within 15 s of onset, as the mean over 3 seeds. False alarms are per seed.
+
+| Detector | Test2 recall | Test2 false alarms | Test recall | Val recall |
+| --- | --- | --- | --- | --- |
+| **Orchestrator, std score (v1)** | **58.0%** | 1.8%, 2.6%, 1.4% | 58.2% | 58.1% |
+| Orchestrator, plain mean (D6 to D9) | 8.1% | 1.4%, 3.2%, 1.8% | 7.3% | 8.1% |
+| Fair z score (conditioned on throttle) | 35.0% | 2.4% | 35.2% | 39.6% |
+| D4 z score | 1.2% | 2.2% | 0.2% | 1.2% |
+| Redline | 0.0% | 0.0% | 0.2% | 0.0% |
+
+- **Gate 1** (mean recall at least 5%, every seed above 1.2%, every seed's false alarms at most 3%): the std score **passes on test2**. On test it cleared the bar but was reported for information only, because it had missed on val by one false alarm. The plain mean failed on val and on test.
+- **Calibration:** the share of healthy runs with confidence at least q is within 3 points of 1 − q for q = 0.8, 0.9 and 0.95, on test and test2.
+- **Attribution:** the channels with the largest residual rise overlap the fault's true channels at 62.2% on test2, against 42.9% on healthy runs and 37.5% by chance. Attention weights don't: 42.2%, against 43.9% on healthy runs.
+
+**What was held out, and what wasn't:** val was used for three rounds of decisions, so val numbers are optimistic. Test was opened once, judged on the plain mean, with every decision committed beforehand. Test2 was pre-registered after test showed the std score clearing the bar: method, bar, seeds and a no-retry rule were committed before the split existed, and it was opened once.
+
+**Limitations:** synthetic data from a reduced-order model, with one fault type (bearing wear). The verdict's ranked channels use the whole-run average residual, not the evaluated rise. Details are in the [decision log](docs/architecture.md#decision-log).
 
 ## Docs
 
-* [Case study](https://williamopyrchal.com/orchestrator-case-study)
 * [Demo](https://williamopyrchal.com/orchestrator)
 * [Design rationale](docs/design-doc.md)
 * [Architecture](docs/architecture.md)

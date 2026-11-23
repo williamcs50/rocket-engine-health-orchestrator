@@ -113,7 +113,7 @@ As of D10 (Nov 23). Every stage below is built.
 | 2026-11-10 | Five floor commitments, adding "the verdict must be legible" | An output a human can't read under pressure gets ignored |
 | 2026-11-10 | d = 16, window = 100 samples, runs of 60 s at 10 ms, throttle the only command | Values from the How It Works book. Mixture ratio is a sensor, not a command |
 | 2026-11-10 | Training objective: forecast all 8 channels 10 to 20 samples ahead | Forces the model to read the throttle, so commanded changes don't raise false alarms. One step ahead can be passed by copying the last value |
-| 2026-11-10 | Encoders share weights, with a channel-ID embedding and per-channel normalization | The case study's "same uniform encoder" with channel tags. Each channel still maps to one token, so attention stays per sensor |
+| 2026-11-10 | Encoders share weights, with a channel-ID embedding and per-channel normalization | The design doc's uniform encoder with channel tags. Each channel still maps to one token, so attention stays per sensor |
 | 2026-11-10 | Channel code names `nozzle_temp` and `feed_pressure` | Shorter names for the plan's "nozzle/coolant temp" and "feed-line pressure", mapped in the table above |
 | 2026-11-10 | In `runs/`, commit each run's `config.*` (with seed) and `metrics.*`, ignore the rest | Small files a reviewer needs to reproduce a number. Everything else is large and regenerable |
 | 2026-11-11 | Redlines come from the physics, set before looking at any runs, one upper limit per channel | Real redlines come from what the hardware survives. When a fault must stay sub-threshold, tune the fault, never the redlines |
