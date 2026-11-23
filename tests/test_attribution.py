@@ -147,7 +147,7 @@ def test_attention_received_sums_to_one_per_sample() -> None:
 
 
 def test_reading_attention_leaves_the_model_unchanged() -> None:
-    # The hook must come off afterwards, or every later forecast would carry it
+    # The hook must come off afterward, or every later forecast would carry it
     model, normalizer, run = model_and_run()
     before = forecast_run(model, normalizer, run, masked=False)
     attention_by_channel(model, normalizer, run)

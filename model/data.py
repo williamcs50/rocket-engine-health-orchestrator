@@ -51,8 +51,9 @@ class Normalizer:
         mean = total / n
         # Rounding can dip just below 0
         std = np.sqrt(np.maximum(total_sq / n - mean**2, 0.0))
-        # A flat channel can leave a rounding residue near 1e-8 instead of exactly 0, which would make
-        # its floor huge and let it dominate the loss. So anything this small relative to the level counts as flat
+        # A flat channel can leave a rounding residue near 1e-8 instead of exactly 0. Its floor would be huge, so
+        # training would ignore it, and normalizing would blow the residue up into unit-size inputs. So anything
+        # this small relative to the level counts as flat
         tiny = std <= 1e-6 * np.maximum(1.0, np.abs(mean))
         if tiny.any():
             raise ValueError(f"zero spread in {[c for c, t in zip(CHANNELS, tiny) if t]}")
