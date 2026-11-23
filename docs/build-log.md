@@ -6,14 +6,14 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 **Exit test (D10):** a stranger can clone, run one command, and reproduce the val numbers. The not-yet-understood column is empty.
 
-- Not yet understood: not met yet. Every item from D1 to D9 moved to "can explain" through nine teach-backs, answered without notes, one per pipeline stage. One question needed a second try (the calibration offsets and the lagged difference), and the second answer was right. Today's test2 and verdict code, built after the teach-backs, is still in the column
-- Reproduce the val numbers: in part, pending one check. A fresh clone installs, passes every fast test, and reproduces the baselines exactly. Retrained models come within about a point, so the three model weights are now committed. A rerun of gate1 from a clone with the committed weights hasn't been checked yet
+- Not yet understood: met. Every item from D1 to D9 moved to "can explain" through nine teach-backs, answered without notes, one per pipeline stage. One question needed a second try (the calibration offsets and the lagged difference), and the second answer was right. Today's test2 and verdict code moved after a short teach-back of its own
+- Reproduce the val numbers: met. The clone check was successful. A fresh clone from GitHub, with the committed weights, passes all 271 fast tests, and `python -m evaluation.gate1` rewrites `runs/gate1_d8/metrics.json` byte for byte identical to the committed file
 
 ### Built
 - Test2, pre-registered (`a512c38`) before the split existed. Seeds 400,000 to 400,999, locked like test, since `LOCKED_SPLITS` now holds both and each has its own lock. `final.py --split test2` judges the std line with the same D8 threshold check, then claims, then opens, and prints and saves the Gate 1 verdict. Tests before code. A val dry run of the test2 path saved nothing
 - The test2 run: the thresholds matched D8's, and the test2 pass took about 26 minutes, from the `started` marker at 3:23 PM to results at 3:49 PM. The std score passes Gate 1. Every number is in the committed `runs/test2/metrics.json`
 - The verdict takes the std score. `to_verdict` has a `score` argument, and `StandardizedScore.verdict_score` gives the same per-sample score test2 used. `model/` still imports nothing from `evaluation/`. Tests before code
-- The fresh-clone check. A clone from GitHub installs from `requirements.txt` on Python 3.11 and passes all 248 fast tests. The baselines reproduce exactly. Retraining doesn't: it starts from the same loss but the weights drift, so the val numbers come out within about a point. So the three D7 `model.pt` files (58 KB each) are now committed
+- The fresh-clone check. A clone from GitHub installs from `requirements.txt` on Python 3.11 and passes all 248 fast tests. The baselines reproduce exactly. Retraining doesn't: it starts from the same loss but the weights drift, so the val numbers come out within about a point. So the three D7 `model.pt` files (58 KB each) are now committed. A second clone, after the weights were committed, was successful: all 271 fast tests passed and gate1 reproduced every val number exactly
 - Docs: architecture.md's reference sections match the final code. Decision rows for the verdict ranking limitation, test2's pre-registration and result, and the committed weights. The README for v1, with status, a quickstart without training, and results on val, test and test2. The data.py comment corrected. Commit hashes in backticks, and American spelling
 - 271 fast tests pass
 
@@ -40,11 +40,17 @@ Test2 predictions, written before the run. Checking the arithmetic before the ru
 
 ### Ledger
 - **Built by hand:** none
-- **Delegated, can explain:** none from today
-- **Delegated, not yet understood:** today's code, built after the teach-backs: test2's split lock (`LOCKED_SPLITS`), the `--split` path in `final.py`, `gate1_verdict`, the verdict's `score` argument and `verdict_score`
+- **Delegated, can explain:** today's code, after its teach-back: test2's split lock (`LOCKED_SPLITS`), the `--split` path in `final.py`, `gate1_verdict`, the verdict's `score` argument and `verdict_score`
+- **Delegated, not yet understood:** none
 - **Moved:** the whole backlog from D1 to D9 to "can explain", through the nine teach-backs. Contracts and the generator, data, the model, scoring, training and saving, the harness and gate1, the fair z score and the std score, calibration, and attribution with the test run
 
 ### Next
+After v1:
+1. Rank the verdict's channels by rise relative to the first alarm, the logged limitation, and evaluate it on a fresh split pre-registered first
+2. The demo with real traces: replace the scripted scenarios with exported runs and update the tour narration. D10's morning task, not started
+3. The std score's false alarms near the 3% cap: passed on test2 but crossed once in three splits. Test the hypothesis that noise scaling with a run's offset widens its swing
+4. A second fault type, so attribution can show it tells faults apart
+5. Later: the GRU experiment from the design doc, deterministic training for future models, and moving the calibrate pass onto `detector_scores`
 
 ## D9 · Fri Nov 20, 2026 · Attribution and the one test run
 
