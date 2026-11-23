@@ -8,3 +8,5 @@ runs/**
 !runs/**/
 !runs/**/config.*
 !runs/**/metrics.*
+# Exception: the three D7 models every result uses, so a fresh clone reproduces the numbers exactly (2026-11-23)
+!runs/h10_mask0.25_cmd_seed*/model.pt
