@@ -85,3 +85,7 @@ class StandardizedScore:
         combined[FIRST_DIFF:] = diff_z[FIRST_DIFF:]
         # NaNs are kept until here, then filled with a value that can never alarm
         return np.where(np.isnan(combined), -np.inf, combined)
+
+    def verdict_score(self, r: np.ndarray, run: Run) -> np.ndarray:
+        """The same score from (N_STEPS, 8) residuals, shaped for to_verdict's score argument. The v1 scoring."""
+        return self.scores(mean_residual(r), run.throttle)

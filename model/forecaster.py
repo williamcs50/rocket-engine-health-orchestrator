@@ -192,8 +192,13 @@ def to_verdict(
     confidence: Callable[[float], float],
     masked: bool = True,
     how: str = AGGREGATE,
+    score: Callable[[np.ndarray, Run], np.ndarray] | None = None,
 ) -> Verdict:
     """Flag, confidence and channels ranked by residual.
+
+    score turns the per-channel residuals and the run into one score per sample. The v1 scoring is the std score,
+    passed in as StandardizedScore.verdict_score (decision log, 2026-11-23). Without it, the verdict uses the
+    aggregate named by how, as on D6 to D9.
 
     threshold and confidence must both come from the same detector's calibrate peaks, so a run flags exactly
     when its confidence is at least 1 minus the budget. Mixing detectors would show "alarm, confidence 0.97".
@@ -202,7 +207,8 @@ def to_verdict(
     """
     # Same switches as residual_scores, so the harness and the verdict always score a run the same way
     r = residual_by_channel(model, normalizer, run, masked)
-    scores = aggregate(r, how)
+    scores = aggregate(r, how) if score is None else score(r, run)
+    # The std score's blind rows are -inf, so they can never be the peak
     peak = scores.max()
     # A NumPy bool would break JSON and `is True`, so convert at the contract boundary
     flag = bool(peak > threshold)
