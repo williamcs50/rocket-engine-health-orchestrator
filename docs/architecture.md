@@ -26,9 +26,11 @@ The generator produces telemetry from a throttle command. Each channel's window 
 contracts.py    frozen constants and the Run, FaultLabel and Verdict types (single source of truth)
 generator/      physics model, fault injection, dataset splits
 model/          encoder, fusion block, training
-evaluation/     redline and persistence baselines, metrics harness
+evaluation/     baselines (redline, D4 and fair z scores), metrics harness, profile reference, std score,
+                calibration, attribution, Gate 1 on val, and the held-out runs on test and test2
 tests/          contract tests and per-phase exit tests
-runs/           one folder per run: config and metrics committed, everything else ignored
+runs/           one folder per run: config and metrics committed. Weights stay local, except the three D7
+                models every result uses
 docs/           design rationale, architecture, two-week plan, build log
 ```
 
@@ -69,7 +71,7 @@ Channel code names map to the names used in the two-week plan and the design doc
 
 - Four disjoint splits (train, validation, calibrate, test) from separate seed ranges.
 - Train holds healthy runs only. Validation, calibrate and test mix healthy and faulted runs.
-- The test split is opened once.
+- The held-out splits, test and test2, are each opened once, enforced in code: `make_run` refuses them outside `open_test_split()`, and the test run script refuses to start if the split's folder already holds results. Test was opened on Nov 20 and test2 on Nov 23.
 - The model sees telemetry and the throttle command only. The injected fault never reaches it.
 - Normalization statistics come from the train split only.
 
@@ -82,7 +84,7 @@ The reasoning is in floor commitment 2 of the [design rationale](design-doc.md).
 
 ## Pipeline details
 
-As of D7 (Nov 18). Every stage below is built except calibration (D8).
+As of D10 (Nov 23). Every stage below is built.
 
 **1. Data.** `make_run` simulates a 60 s run from a seed. `Normalizer.fit` takes each channel's mean and std from healthy train runs only, plus its noise floor, `SENSOR_NOISE² / std²`, in normalized units. `make_windows` cuts a run into views, not copies: a 100-sample window per channel, the throttle from the window's start up to the target time (`WINDOW + horizon` samples), and the target `horizon` samples after the window ends. The first forecast is at sample 109 (1.09 s).
 
@@ -96,11 +98,13 @@ As of D7 (Nov 18). Every stage below is built except calibration (D8).
 
 **6. Training** (`model/train.py`). 500 healthy train runs, 10,000 Adam steps at learning rate 1e-3, batches of 256 random (run, window) pairs. The loss is each channel's squared error divided by its noise floor, averaged. Batches, masks and the probe each have their own random stream (`[seed, 1]`, `[seed, 2]`, `[seed, 3]`). The probe is one fixed batch of 1,024 windows, measured before training and every 100 steps. Each run saves `config.json` (every setting plus the normalizer) and `metrics.json` (the probe curve and training time) to git, and `model.pt` locally only.
 
-**7. Scoring.** Each channel's residual is `(actual − forecast)² / floor`, which equals `(error / sensor noise)²`, so 1 means a miss of one noise sigma. The 8 residuals are averaged into one score per sample (`AGGREGATE = "mean"`). The first 109 samples score 0.
+**7. Scoring.** Each channel's residual is `(actual − forecast)² / floor`, which equals `(error / sensor noise)²`, so 1 means a miss of one noise sigma. Masked scoring forecasts each channel with only itself hidden. The v1 scoring is the std score (`evaluation/score.py`): the mean of the 8 residuals with the first 109 samples kept NaN, minus the same run's average from 20 to 15 s earlier, standardized against healthy runs at the same point in the throttle profile. It passed Gate 1 on test2. D6 to D9 used the plain mean (`AGGREGATE = "mean"`), which is still reported for comparison.
 
-**8. Thresholds and evaluation** (`evaluation/harness.py`, `evaluation/gate1.py`). Each threshold is set from the peak scores of calibrate's 500 healthy runs at the 2% budget (1% and 5% reported). Results are reported on val: recall within 15 s of onset, false alarms, transient false alarms, early alarms and delay.
+**8. Thresholds and evaluation** (`evaluation/harness.py`, `evaluation/gate1.py`, `evaluation/final.py`). Each threshold is set from the peak scores of calibrate's 500 healthy runs at the 2% budget (1% and 5% reported). Gate 1 was judged on val, then once on test and once on test2: recall within 15 s of onset, false alarms, transient false alarms, early alarms and delay. The baselines are the redline, the D4 z score and the fair z score, which is conditioned on the throttle profile (`evaluation/profile.py`). Each held-out run starts only after its thresholds match D8's.
 
-**9. Calibration and verdict.** `to_verdict` flags a run whose score crosses the threshold and ranks channels by average residual. Its confidence is a placeholder until calibration on D8.
+**9. Calibration and verdict** (`evaluation/calibration.py`). A run's confidence is the share of calibrate's healthy peaks strictly below its own peak, so it flags at the 2% budget exactly when its confidence is at least 0.98. `to_verdict` takes the std score through its `score` argument (`StandardizedScore.verdict_score`) and returns the flag, the confidence, and the channels ranked by their whole-run average residual, which is a logged limitation.
+
+**10. Attribution** (`evaluation/attribution.py`). Each channel's rise from onset to onset + 15 s, against its own mean before onset, for both residuals and the self-attention each channel receives. The top 3 are compared with the fault's ground truth channels, and with a healthy control that borrows the next seed's onset.
 
 ## Decision log
 
