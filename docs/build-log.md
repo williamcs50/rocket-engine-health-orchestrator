@@ -6,29 +6,43 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 **Exit test (D10):** a stranger can clone, run one command, and reproduce the val numbers. The not-yet-understood column is empty.
 
+- Not yet understood: not met yet. Every item from D1 to D9 moved to "can explain" through nine teach-backs, answered without notes, one per pipeline stage. One question needed a second try (the calibration offsets and the lagged difference), and the second answer was right. Today's test2 and verdict code, built after the teach-backs, is still in the column
+- Reproduce the val numbers: in part, pending one check. A fresh clone installs, passes every fast test, and reproduces the baselines exactly. Retrained models come within about a point, so the three model weights are now committed. A rerun of gate1 from a clone with the committed weights hasn't been checked yet
+
 ### Built
+- Test2, pre-registered (`a512c38`) before the split existed. Seeds 400,000 to 400,999, locked like test, since `LOCKED_SPLITS` now holds both and each has its own lock. `final.py --split test2` judges the std line with the same D8 threshold check, then claims, then opens, and prints and saves the Gate 1 verdict. Tests before code. A val dry run of the test2 path saved nothing
+- The test2 run: the thresholds matched D8's, and the test2 pass took about 26 minutes, from the `started` marker at 3:23 PM to results at 3:49 PM. The std score passes Gate 1. Every number is in the committed `runs/test2/metrics.json`
+- The verdict takes the std score. `to_verdict` has a `score` argument, and `StandardizedScore.verdict_score` gives the same per-sample score test2 used. `model/` still imports nothing from `evaluation/`. Tests before code
+- The fresh-clone check. A clone from GitHub installs from `requirements.txt` on Python 3.11 and passes all 248 fast tests. The baselines reproduce exactly. Retraining doesn't: it starts from the same loss but the weights drift, so the val numbers come out within about a point. So the three D7 `model.pt` files (58 KB each) are now committed
+- Docs: architecture.md's reference sections match the final code. Decision rows for the verdict ranking limitation, test2's pre-registration and result, and the committed weights. The README for v1, with status, a quickstart without training, and results on val, test and test2. The data.py comment corrected. Commit hashes in backticks, and American spelling
+- 271 fast tests pass
 
 ### Decided
+- The design doc stays as the pre-build rationale, with no Results section, a small deviation from the plan's D10 row. Results live in the README and the decision log
 
 ### Expected vs actual
-Test2 predictions, written before the run. Claude checked the arithmetic: my per-seed false alarm rates give about a 30% chance that all three seeds stay at or under 3%, so I raised my confidence in a fail from 55% to 70%. The caught prediction was added at Claude's suggestion, since caught now follows the std line.
+Test2 predictions, written before the run. Checking the arithmetic before the run showed that my per-seed false alarm rates give about a 30% chance that all three seeds stay at or under 3%, so I raised my confidence in a fail from 55% to 70%. The caught prediction was added at the same check, since caught now follows the std line.
 
 | Expected | Actual | Why |
 | --- | --- | --- |
-| Std line (judged): mean recall about 58%. False alarms per seed about 2.8%, 2.7% and 2.9%, the averages of val and test. Gate 1 fails, because each seed's expected rate sits just under the 3% cap and sampling noise is about 0.7 points per seed, so all three staying at or under 15 of 500 is less likely than not. About 70% confident | | |
-| Mean line, for information: mean recall about 8%, highest false alarm about 3.3% | | |
-| Fair z score about 37% | | |
-| Calibration exit test on the std line passes. About 60% confident | | |
-| All faulted runs: residual overlap about 60%, attention overlap about 41%. Healthy control about 42% | | |
-| Caught runs, now following the std line: residual overlap close to the all faulted number, about 60% | | |
+| Std line (judged): mean recall about 58%. False alarms per seed about 2.8%, 2.7% and 2.9%, the averages of val and test. Gate 1 fails, because each seed's expected rate sits just under the 3% cap and sampling noise is about 0.7 points per seed, so all three staying at or under 15 of 500 is less likely than not. About 70% confident | Gate 1 passes. Mean recall 58.0%, seeds 52.4%, 64.8% and 56.8%. False alarms 1.8%, 2.6% and 1.4% | Recall right, the verdict wrong. Seeds 0 and 2 came in well under the val and test averages. Each seed's rate swings by about 0.7 points from sampling, and this split drew low ones. One pass doesn't show the true rates are lower |
+| Mean line, for information: mean recall about 8%, highest false alarm about 3.3% | Mean recall 8.1%, highest false alarm 3.2% | Right. The same model, so close to val and test |
+| Fair z score about 37% | 35.0% | Close. The same as test's 35.2% |
+| Calibration exit test on the std line passes. About 60% confident | Passes on every seed and both lines | Right. The q = 0.9 cells, which failed on val, came in at 9.2%, 10.0% and 9.4% |
+| All faulted runs: residual overlap about 60%, attention overlap about 41%. Healthy control about 42% | Residual 62.2%, attention 42.2%. Healthy control 42.9% for residuals and 43.9% for attention | Right. The same pattern as test: residuals follow the fault and attention matches its control |
+| Caught runs, now following the std line: residual overlap close to the all faulted number, about 60% | 65.3%, on 262, 324 and 284 runs | A few points higher. Caught runs tend to be the larger faults, so the rise is clearer, and with the std line there are enough of them to show it |
 
 ### Learned
+- Holding the rule is what made the pass count. The std score missed val by one run, cleared test for information only, then passed test2. Adopting it on Friday would have looked the same on paper, but every number after that would have carried an asterisk
+- Pre-registration is what makes a second held-out run legitimate. Writing the method, bar, seeds and no-retry rule before the split existed turned "run it again until it passes" into one clean test
+- A fixed seed isn't reproducibility. The same seed gave the same starting loss but different trained weights, from floating point order in multithreaded math. Reproducing the numbers needed the weights themselves committed
+- Explaining the code finds what tests don't. The teach-backs turned up a comment that stated the opposite of what the code does, and a verdict ranking different from the one that was evaluated. Every test passed on both
 
 ### Ledger
-- **Built by hand:**
-- **Delegated, can explain:**
-- **Delegated, not yet understood:**
-- **Moved:**
+- **Built by hand:** none
+- **Delegated, can explain:** none from today
+- **Delegated, not yet understood:** today's code, built after the teach-backs: test2's split lock (`LOCKED_SPLITS`), the `--split` path in `final.py`, `gate1_verdict`, the verdict's `score` argument and `verdict_score`
+- **Moved:** the whole backlog from D1 to D9 to "can explain", through the nine teach-backs. Contracts and the generator, data, the model, scoring, training and saving, the harness and gate1, the fair z score and the std score, calibration, and attribution with the test run
 
 ### Next
 
@@ -74,7 +88,7 @@ Test2 predictions, written before the run. Claude checked the arithmetic: my per
 - The std score is pre-registered for a fresh split, `test2`, after v1, with the same bar and the split opened once
 
 ### Expected vs actual
-Written before the test run, from estimates I drafted with Claude and adjusted. The healthy control prediction is influenced by a glimpse of the val dry run (20 seeds per split), not by test.
+Written before the test run, from drafted estimates I adjusted. The healthy control prediction is influenced by a glimpse of the val dry run (20 seeds per split), not by test.
 
 | Expected | Actual | Why |
 | --- | --- | --- |
@@ -432,7 +446,6 @@ A forecaster that reads a channel's own recent history simply continues a slow d
 - Ledger check: done. Nothing left in "not yet understood", every move recorded
 - Reread the D1 to D4 build logs: _done or skipped_
 - Redo one hand-built piece from memory and compare with the real code: _which piece, and how close, or skipped_
-- Update the case study's status line: _done or skipped_
 - Anything skipped carries to Saturday's review
 
 ### Ledger
