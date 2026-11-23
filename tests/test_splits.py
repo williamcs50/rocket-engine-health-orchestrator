@@ -3,10 +3,11 @@ from itertools import combinations
 import numpy as np
 import pytest
 
-from generator.splits import SPLITS, fault_for, make_run, open_test_split
+import generator.splits as splits
+from generator.splits import LOCKED_SPLITS, SPLITS, fault_for, make_run, open_test_split
 
 def test_split_seeds_never_overlap() -> None:
-    assert set(SPLITS) == {"train", "val", "calibrate", "test"}
+    assert set(SPLITS) == {"train", "val", "calibrate", "test", "test2"}
     for a, b in combinations(SPLITS, 2):
         shared = set(SPLITS[a]) & set(SPLITS[b])
         assert not shared, f"{a} and {b} share {len(shared)} seeds, e.g. {min(shared)}"
@@ -15,13 +16,13 @@ def test_train_is_healthy() -> None:
     faulted = [seed for seed in SPLITS["train"] if fault_for("train", seed) is not None]
     assert not faulted, f"{len(faulted)} train seeds get a fault, e.g. {faulted[0]}"
 
-@pytest.mark.parametrize("split", ["val", "calibrate", "test"])
+@pytest.mark.parametrize("split", ["val", "calibrate", "test", "test2"])
 def test_val_calibrate_test_contain_faults(split: str) -> None:
     faults = [fault_for(split, seed) for seed in SPLITS[split]]
     assert any(f is None for f in faults), f"{split} has no healthy seeds"
     assert any(f is not None for f in faults), f"{split} has no faulted seeds"
 
-# Test is left out, since only the D9 script may simulate it. Val and calibrate run the same code
+# Test and test2 are left out, since only the test run script may simulate them. Val and calibrate run the same code
 @pytest.mark.parametrize("split", ["train", "val", "calibrate"])
 def test_split_runs_are_reproducible(split: str) -> None:
     for seed in SPLITS[split][:2]:
@@ -67,6 +68,56 @@ def test_test_split_locks_again_after_an_error_inside() -> None:
 def test_test_labels_stay_readable_without_the_context() -> None:
     # Labels come from the seed alone, with no simulated data, so fault_for isn't guarded
     assert fault_for("test", SPLITS["test"][1]) is not None
+
+# Test2, pre-registered on 2026-11-23. No test here may simulate a test2 run, so opening it is checked with the
+# simulator stubbed out
+
+def test_test2_is_seeds_400000_to_400999() -> None:
+    assert SPLITS["test2"] == range(400_000, 401_000)
+
+
+def test_both_test_splits_are_locked() -> None:
+    assert set(LOCKED_SPLITS) == {"test", "test2"}
+
+
+@pytest.mark.parametrize("split", ["test", "test2"])
+def test_a_locked_split_is_refused_by_default(split: str) -> None:
+    # Refused before anything is simulated, so this reads no data
+    with pytest.raises(PermissionError):
+        make_run(split, SPLITS[split][0])
+
+
+def test_test2_opens_inside_its_own_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    simulated = []
+    monkeypatch.setattr(splits, "simulate", lambda throttle, seed, fault=None: simulated.append(seed))
+    with open_test_split("test2"):
+        make_run("test2", SPLITS["test2"][0])
+    assert simulated == [SPLITS["test2"][0]]
+
+
+def test_opening_one_locked_split_leaves_the_other_locked() -> None:
+    with open_test_split("test2"):
+        with pytest.raises(PermissionError):
+            make_run("test", SPLITS["test"][0])
+    with open_test_split("test"):
+        with pytest.raises(PermissionError):
+            make_run("test2", SPLITS["test2"][0])
+
+
+def test_test2_locks_again_after_an_error_inside() -> None:
+    with pytest.raises(RuntimeError):
+        with open_test_split("test2"):
+            raise RuntimeError("crash mid-run")
+    with pytest.raises(PermissionError):
+        make_run("test2", SPLITS["test2"][0])
+
+
+def test_only_locked_splits_can_be_opened() -> None:
+    # Opening val would do nothing, so asking for it is a mistake worth catching
+    with pytest.raises(ValueError):
+        with open_test_split("val"):
+            pass
+
 
 def test_fault_for_rejects_unknown_split() -> None:
     with pytest.raises(ValueError):

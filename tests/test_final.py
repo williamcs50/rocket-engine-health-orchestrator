@@ -8,7 +8,8 @@ import pytest
 from contracts import CHANNELS, DT_S, N_STEPS
 from evaluation.baselines import ZScoreBaseline, redline_scores
 from evaluation.budget import REPORT_SPLIT
-from evaluation.final import attribution_row, check_thresholds, claim_test_run, plan
+from evaluation.final import attribution_row, check_thresholds, claim_test_run, gate1_verdict, lines, plan
+from evaluation.harness import Report
 from evaluation.gate1 import detector_scores
 from evaluation.score import StandardizedScore, mean_residual
 from generator.engine import WEAR_CHANNELS
@@ -53,6 +54,71 @@ def test_a_dry_run_uses_val_and_saves_nothing() -> None:
 
 def test_the_real_run_uses_test_and_saves_to_runs_test() -> None:
     assert plan(dry_run=None) == ("test", RUNS_DIR / "test")
+
+
+def test_test2_saves_to_runs_test2() -> None:
+    assert plan(dry_run=None, split="test2") == ("test2", RUNS_DIR / "test2")
+
+
+def test_a_test2_dry_run_still_uses_val_and_saves_nothing() -> None:
+    assert plan(dry_run=20, split="test2") == ("val", None)
+
+
+def test_an_unlocked_split_is_refused() -> None:
+    # Only the two held-out splits get a real run
+    with pytest.raises(ValueError):
+        plan(dry_run=None, split="val")
+
+
+# Which line is judged, per the decision log: mean on test (2026-11-19), std on test2 (2026-11-23)
+
+def test_test_judges_the_mean_line() -> None:
+    assert lines("test") == ("mean", "std")
+
+
+def test_test2_judges_the_std_line() -> None:
+    assert lines("test2") == ("std", "mean")
+
+
+# The Gate 1 verdict on the judged line, unchanged since D6
+
+def report(recall: float, false_alarm: float) -> Report:
+    return Report(recall=recall, mean_delay_s=None, false_alarm_rate=false_alarm, transient_false_alarm_rate=0.0,
+                  early_alarm_rate=0.0, events_per_run=0.0)
+
+
+def reports(line: str, recalls: list[float], false_alarms: list[float]) -> dict:
+    return {(f"m{i}/{line}", 0.02): report(r, f) for i, (r, f) in enumerate(zip(recalls, false_alarms))}
+
+
+MODELS3 = ["m0", "m1", "m2"]
+
+
+def test_test_numbers_for_the_std_line_pass() -> None:
+    # The std line on test: 52.0%, 64.0%, 58.6% at 2.4%, 2.8%, 3.0%
+    passed, _ = gate1_verdict(reports("std", [0.52, 0.64, 0.586], [0.024, 0.028, 0.030]), "std", MODELS3)
+    assert passed
+
+
+def test_one_seed_over_3_percent_fails() -> None:
+    # The mean line on test: seed 1 at 3.2%
+    passed, conditions = gate1_verdict(reports("mean", [0.176, 0.016, 0.028], [0.026, 0.032, 0.022]), "mean", MODELS3)
+    assert not passed
+    assert [ok for ok in conditions.values()] == [True, True, False]
+
+
+def test_exactly_3_percent_passes_and_exactly_1_2_percent_recall_fails() -> None:
+    # At most 3% false alarms, edge included. Every seed's recall strictly above 1.2%
+    passed, _ = gate1_verdict(reports("std", [0.5, 0.5, 0.5], [0.03, 0.03, 0.03]), "std", MODELS3)
+    assert passed
+    passed, _ = gate1_verdict(reports("std", [0.5, 0.5, 0.012], [0.02, 0.02, 0.02]), "std", MODELS3)
+    assert not passed
+
+
+def test_a_mean_recall_of_exactly_5_percent_passes() -> None:
+    # Floating point can put a mean of three shares a hair under 5%
+    passed, _ = gate1_verdict(reports("std", [0.05, 0.05, 0.05], [0.02, 0.02, 0.02]), "std", MODELS3)
+    assert passed
 
 
 # The thresholds must match D8's before test is opened
@@ -172,10 +238,11 @@ def stub_slow_parts(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
     monkeypatch.setattr(final, "calibration_exit_test", lambda *args: {})
     monkeypatch.setattr(final, "summarize_attribution", lambda *args: {})
     monkeypatch.setattr(final, "print_results", lambda *args: None)
+    monkeypatch.setattr(final, "gate1_verdict", lambda *args: (False, {}))
     monkeypatch.setattr(final, "claim_test_run", lambda out: calls.append("claim"))
 
-    def opened() -> object:
-        calls.append("open test")
+    def opened(split: str = "test") -> object:
+        calls.append(f"open {split}")
         return nullcontext()
 
     monkeypatch.setattr(final, "open_test_split", opened)
@@ -197,7 +264,7 @@ def test_a_threshold_mismatch_stops_before_the_claim(monkeypatch: pytest.MonkeyP
 
     calls: list[str] = []
     stub_slow_parts(monkeypatch, calls)
-    monkeypatch.setattr(final, "plan", lambda dry_run: ("test", tmp_path / "test"))
+    monkeypatch.setattr(final, "plan", lambda dry_run, split="test": ("test", tmp_path / "test"))
 
     def mismatch(*args) -> None:
         raise ValueError("drifted")
@@ -213,9 +280,22 @@ def test_the_real_run_checks_then_claims_then_opens_test(monkeypatch: pytest.Mon
 
     calls: list[str] = []
     stub_slow_parts(monkeypatch, calls)
-    monkeypatch.setattr(final, "plan", lambda dry_run: ("test", tmp_path / "test"))
+    monkeypatch.setattr(final, "plan", lambda dry_run, split="test": ("test", tmp_path / "test"))
     monkeypatch.setattr(final, "check_thresholds", lambda *args: calls.append("check"))
     # Saving needs the folder the claim would have made
     (tmp_path / "test").mkdir()
     final.main()
     assert calls == ["check", "claim", "open test"]
+
+
+def test_the_test2_run_checks_then_claims_then_opens_test2(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import evaluation.final as final
+
+    calls: list[str] = []
+    stub_slow_parts(monkeypatch, calls)
+    monkeypatch.setattr(final, "plan", lambda dry_run, split="test": (split, tmp_path / split))
+    monkeypatch.setattr(final, "check_thresholds", lambda *args: calls.append("check"))
+    monkeypatch.setattr(final, "gate1_verdict", lambda *args: (False, {}))
+    (tmp_path / "test2").mkdir()
+    final.main(split="test2")
+    assert calls == ["check", "claim", "open test2"]
