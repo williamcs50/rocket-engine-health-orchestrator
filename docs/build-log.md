@@ -2,6 +2,36 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D10 · Mon Nov 23, 2026 · P6 demo and ship
+
+**Exit test (D10):** a stranger can clone, run one command, and reproduce the val numbers. The not-yet-understood column is empty.
+
+### Built
+
+### Decided
+
+### Expected vs actual
+Test2 predictions, written before the run. Claude checked the arithmetic: my per-seed false alarm rates give about a 30% chance that all three seeds stay at or under 3%, so I raised my confidence in a fail from 55% to 70%. The caught prediction was added at Claude's suggestion, since caught now follows the std line.
+
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Std line (judged): mean recall about 58%. False alarms per seed about 2.8%, 2.7% and 2.9%, the averages of val and test. Gate 1 fails, because each seed's expected rate sits just under the 3% cap and sampling noise is about 0.7 points per seed, so all three staying at or under 15 of 500 is less likely than not. About 70% confident | | |
+| Mean line, for information: mean recall about 8%, highest false alarm about 3.3% | | |
+| Fair z score about 37% | | |
+| Calibration exit test on the std line passes. About 60% confident | | |
+| All faulted runs: residual overlap about 60%, attention overlap about 41%. Healthy control about 42% | | |
+| Caught runs, now following the std line: residual overlap close to the all faulted number, about 60% | | |
+
+### Learned
+
+### Ledger
+- **Built by hand:**
+- **Delegated, can explain:**
+- **Delegated, not yet understood:**
+- **Moved:**
+
+### Next
+
 ## D9 · Fri Nov 20, 2026 · Attribution and the one test run
 
 **Exit test (D9):** met. The final test table is complete, from one test run on commit `47cce60`, with a clean working tree and the model hashes recorded. Against the Gate 1 bar, which still applies, the judged line fails by one healthy run. Reported as the clean result: test was opened once, with every decision committed beforehand.
