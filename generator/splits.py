@@ -16,6 +16,9 @@ SPLITS: dict[str, range] = {
     "test":      range(300_000, 301_000),
     # Pre-registered on 2026-11-23, before any of its runs existed. Opened once, for the std score
     "test2":     range(400_000, 401_000),
+    # Pre-registered on 2026-11-24. Val2 is for development, since val is used up. Test3 is held out
+    "val2":      range(500_000, 501_000),
+    "test3":     range(600_000, 601_000),
 }
 
 # Sorted by start, checking each neighbor covers every pair because ranges are contiguous.
@@ -23,7 +26,7 @@ _ranges = sorted(SPLITS.values(), key=lambda r: r.start)
 for a, b in zip(_ranges, _ranges[1:]):
     assert a.stop <= b.start, f"seed ranges overlap: {a} and {b}"
 
-FAULTED_SPLITS = ("val", "calibrate", "test", "test2")  # train stays healthy: the model learns normal only
+FAULTED_SPLITS = ("val", "calibrate", "test", "test2", "val2", "test3")  # train stays healthy: the model learns normal only
 
 
 def fault_for(split: str, seed: int) -> FaultLabel | None:
@@ -41,7 +44,7 @@ def fault_for(split: str, seed: int) -> FaultLabel | None:
 
 
 # Held-out splits, each opened once by the test run script. Only open_test_split changes which are open
-LOCKED_SPLITS = ("test", "test2")
+LOCKED_SPLITS = ("test", "test2", "test3")
 _open: set[str] = set()
 
 

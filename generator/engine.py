@@ -120,6 +120,20 @@ def make_fault(seed: int) -> FaultLabel:
     )
 
 
+def calibration_offsets(seed: int) -> np.ndarray:
+    """(8,): each channel's calibration offset in noise sigmas, recovered by replaying simulate's engine stream.
+
+    simulate draws from [seed, ENGINE_STREAM] in a fixed order: one variation per physical constant, then one
+    offset per channel. Replaying that order gives the exact offsets without simulating the run.
+    """
+    rng = np.random.default_rng([seed, ENGINE_STREAM])
+    # The variations come first, one per constant in NOMINAL's order. Only their place in the stream matters here
+    for _ in NOMINAL:
+        rng.uniform(1 - VARIATION, 1 + VARIATION)
+    # Then one offset per channel, in CHANNELS order. simulate scales each by its channel's noise
+    return np.array([OFFSET_MAX * rng.uniform(-1, 1) for _ in CHANNELS])
+
+
 def _algebraic(
     n: float | np.ndarray, wear: float | np.ndarray, p: dict[str, float]
 ) -> tuple[float | np.ndarray, ...]:
