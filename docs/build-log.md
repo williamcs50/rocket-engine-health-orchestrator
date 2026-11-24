@@ -6,7 +6,22 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 **Exit test (D11):** the diagnostic, pre-registered in the decision log (2026-11-24). It holds if, on val2's healthy runs, offset and swing have a Spearman correlation of at least 0.3 on every seed, and the engines that false-alarm on any seed have a higher median offset than the engines that never alarm.
 
+The diagnostic ran as pre-registered, on commit `27900a8` with a clean tree and the std thresholds matching D8's. The hypothesis does not hold, on the first condition.
+
+| Condition | Bar | Result |
+| --- | --- | --- |
+| Spearman, offset against swing | At least 0.3 on every seed | 0.062, 0.064 and 0.057: fails |
+| Median offset, false alarm engines against the rest | Higher | 1.873 against 1.720: holds |
+
+- The std score's false alarms on val2 were 2.0%, 2.4% and 2.0%. 23 of 500 healthy engines false-alarm on at least one seed.
+- Every number and per-engine row is in the committed `runs/diagnose_offsets/metrics.json`.
+
 ### Built
+- Val2 (seeds 500,000 to 500,999) for development and test3 (600,000 to 600,999), locked like test and reserved
+- `calibration_offsets(seed)` in `generator/engine.py`: each channel's offset in noise sigmas, recovered by replaying the engine random stream. Checked against `simulate` itself, where the channels that start at 0 read exactly their offset
+- `evaluation/diagnose.py`: swing, RMS offset, Spearman from ranks with ties averaged, engines counted once, and the verdict. Tests before code
+- The CI actions upgraded to checkout v5 and setup-python v6, which run on Node 24
+- 298 fast tests pass
 
 ### Decided
 
@@ -15,20 +30,23 @@ Written before the diagnostic runs, and before any val2 data exists.
 
 | Expected | Actual | Why |
 | --- | --- | --- |
-| Spearman between offset and swing, per seed: about 0.25, 0.30 and 0.25. At least 0.3 on every seed: no. About 55% confident | | |
-| Median offset of false alarm engines against never-alarm engines: about 1.85 against 1.7 noise sigmas. Higher: yes. About 60% confident | | |
-| Overall, the hypothesis holds (both conditions): no. About 60% confident | | |
-| Healthy val2 engines that false-alarm on at least one seed: about 30 of 500 | | |
+| Spearman between offset and swing, per seed: about 0.25, 0.30 and 0.25. At least 0.3 on every seed: no. About 55% confident | 0.062, 0.064 and 0.057 | The verdict right, the values far lower. Offsets barely explain the swing, so something else drives it |
+| Median offset of false alarm engines against never-alarm engines: about 1.85 against 1.7 noise sigmas. Higher: yes. About 60% confident | 1.873 against 1.720 | Right, almost exactly |
+| Overall, the hypothesis holds (both conditions): no. About 60% confident | Does not hold | Right |
+| Healthy val2 engines that false-alarm on at least one seed: about 30 of 500 | 23 | Close. Slightly fewer, with val2's false alarm rates at the 2% target |
 
 ### Learned
+- A mechanism that's right on paper can be negligible in practice. The `2·offset·noise` term exists, but it's swamped by whatever else drives the swing
+- Checking the cause before building the fix saved building one that wouldn't have helped
 
 ### Ledger
-- **Built by hand:**
-- **Delegated, can explain:**
-- **Delegated, not yet understood:**
-- **Moved:**
+- **Built by hand:** none
+- **Delegated, can explain:** none yet
+- **Delegated, not yet understood:** `calibration_offsets` and `evaluation/diagnose.py`, walked through but not yet questioned
+- **Moved:** none
 
 ### Next
+N/A. This was the project's last day
 
 ## D10 · Mon Nov 23, 2026 · P6 demo and ship
 
