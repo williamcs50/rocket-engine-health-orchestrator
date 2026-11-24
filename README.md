@@ -60,10 +60,11 @@ At the 2% false alarm budget (at most 10 of 500 healthy runs alarm on calibrate)
 - **Gate 1** (mean recall at least 5%, every seed above 1.2%, every seed's false alarms at most 3%): the std score **passes on test2**. On test it cleared the bar but was reported for information only, because it had missed on val by one false alarm. The plain mean failed on val and on test.
 - **Calibration:** the share of healthy runs with confidence at least q is within 3 points of 1 − q for q = 0.8, 0.9 and 0.95, on test and test2.
 - **Attribution:** the channels with the largest residual rise overlap the fault's true channels at 62.2% on test2, against 42.9% on healthy runs and 37.5% by chance. Attention weights don't: 42.2%, against 43.9% on healthy runs.
+- **False alarms (v1.1):** the std score's false alarms sit near the cap, at 1.4% to 3.2% per seed across splits. A pre-registered diagnostic on a fresh development split, val2, ruled out calibration offsets as the cause: offset and score swing have a Spearman correlation of about 0.06. On val2 the false alarms were 2.0%, 2.4% and 2.0%.
 
 **What was held out, and what wasn't:** val was used for three rounds of decisions, so val numbers are optimistic. Test was opened once, judged on the plain mean, with every decision committed beforehand. Test2 was pre-registered after test showed the std score clearing the bar: method, bar, seeds and a no-retry rule were committed before the split existed, and it was opened once.
 
-**Limitations:** synthetic data from a reduced-order model, with one fault type (bearing wear). The verdict's ranked channels use the whole-run average residual, not the evaluated rise. Details are in the [decision log](docs/architecture.md#decision-log).
+**Limitations:** synthetic data from a reduced-order model, with one fault type (bearing wear). The verdict's ranked channels use the whole-run average residual, not the evaluated rise. The std score's false alarms sit close to the 3% cap, so whether a split passes is partly sampling. The cause isn't pinned down. Details are in the [decision log](docs/architecture.md#decision-log).
 
 ## Docs
 
