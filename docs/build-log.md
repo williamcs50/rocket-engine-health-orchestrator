@@ -31,8 +31,8 @@ Written before the diagnostic runs, and before any val2 data exists.
 | Expected | Actual | Why |
 | --- | --- | --- |
 | Spearman between offset and swing, per seed: about 0.25, 0.30 and 0.25. At least 0.3 on every seed: no. About 55% confident | 0.062, 0.064 and 0.057 | The verdict right, the values far lower. Offsets barely explain the swing, so something else drives it |
-| Median offset of false alarm engines against never-alarm engines: about 1.85 against 1.7 noise sigmas. Higher: yes. About 60% confident | 1.873 against 1.720 | Right, almost exactly |
-| Overall, the hypothesis holds (both conditions): no. About 60% confident | Does not hold | Right |
+| Median offset of false alarm engines against never-alarm engines: about 1.85 against 1.7 noise sigmas. Higher: yes. About 60% confident | 1.873 against 1.720 | The false alarm engines lean slightly toward larger offsets, as expected for a partial cause. With 23 engines, the gap is small and untested for size |
+| Overall, the hypothesis holds (both conditions): no. About 60% confident | Does not hold | It failed on the first condition alone. Offsets barely relate to swing, so a true second condition couldn't carry it |
 | Healthy val2 engines that false-alarm on at least one seed: about 30 of 500 | 23 | Close. Slightly fewer, with val2's false alarm rates at the 2% target |
 
 ### Learned
