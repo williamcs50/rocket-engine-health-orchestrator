@@ -2,6 +2,34 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D11 · Tue Nov 24, 2026 · v1.1, false alarms near the cap
+
+**Exit test (D11):** the diagnostic, pre-registered in the decision log (2026-11-24). It holds if, on val2's healthy runs, offset and swing have a Spearman correlation of at least 0.3 on every seed, and the engines that false-alarm on any seed have a higher median offset than the engines that never alarm.
+
+### Built
+
+### Decided
+
+### Expected vs actual
+Written before the diagnostic runs, and before any val2 data exists.
+
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Spearman between offset and swing, per seed: about 0.25, 0.30 and 0.25. At least 0.3 on every seed: no. About 55% confident | | |
+| Median offset of false alarm engines against never-alarm engines: about 1.85 against 1.7 noise sigmas. Higher: yes. About 60% confident | | |
+| Overall, the hypothesis holds (both conditions): no. About 60% confident | | |
+| Healthy val2 engines that false-alarm on at least one seed: about 30 of 500 | | |
+
+### Learned
+
+### Ledger
+- **Built by hand:**
+- **Delegated, can explain:**
+- **Delegated, not yet understood:**
+- **Moved:**
+
+### Next
+
 ## D10 · Mon Nov 23, 2026 · P6 demo and ship
 
 **Exit test (D10):** a stranger can clone, run one command, and reproduce the val numbers. The not-yet-understood column is empty.
