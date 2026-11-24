@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from contracts import CHANNELS, N_STEPS, DT_S, Run
-from generator.engine import LEVEL_MAX, REDLINES, make_throttle, simulate
+from generator.engine import LEVEL_MAX, OFFSET_MAX, REDLINES, SENSOR_NOISE, calibration_offsets, make_throttle, simulate
 
 SEEDS = range(5)
 
@@ -87,3 +87,28 @@ def test_nominal_run_stays_under_redlines(seed: int) -> None:
         peak = col(run, name).max()
         assert peak < limit, f"{name} peaked at {peak:.3g}, redline {limit:.3g}"
   
+
+# Calibration offsets, recovered from the seed (decision log, 2026-11-24)
+
+# At the first sample, speed is 0, so these channels read exactly 0 plus their offset when noise is off
+ZERO_AT_START = ("chamber_pressure", "turbopump_speed", "turbopump_vibration", "coolant_flow", "feed_pressure")
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_offsets_match_what_simulate_added(seed: int) -> None:
+    run = simulate(make_throttle(seed), seed, noise=False)
+    offsets = calibration_offsets(seed)
+    for name in ZERO_AT_START:
+        i = CHANNELS.index(name)
+        assert run.sensors[0, i] == pytest.approx(offsets[i] * SENSOR_NOISE[name], abs=1e-9)
+
+
+def test_offsets_are_in_noise_sigmas_within_the_limit() -> None:
+    offsets = np.array([calibration_offsets(s) for s in range(200)])
+    assert offsets.shape == (200, len(CHANNELS))
+    assert np.abs(offsets).max() <= OFFSET_MAX
+
+
+def test_offsets_reproduce_and_differ_between_seeds() -> None:
+    np.testing.assert_array_equal(calibration_offsets(7), calibration_offsets(7))
+    assert not np.array_equal(calibration_offsets(7), calibration_offsets(8))

@@ -7,7 +7,7 @@ import generator.splits as splits
 from generator.splits import LOCKED_SPLITS, SPLITS, fault_for, make_run, open_test_split
 
 def test_split_seeds_never_overlap() -> None:
-    assert set(SPLITS) == {"train", "val", "calibrate", "test", "test2"}
+    assert set(SPLITS) == {"train", "val", "calibrate", "test", "test2", "val2", "test3"}
     for a, b in combinations(SPLITS, 2):
         shared = set(SPLITS[a]) & set(SPLITS[b])
         assert not shared, f"{a} and {b} share {len(shared)} seeds, e.g. {min(shared)}"
@@ -16,7 +16,7 @@ def test_train_is_healthy() -> None:
     faulted = [seed for seed in SPLITS["train"] if fault_for("train", seed) is not None]
     assert not faulted, f"{len(faulted)} train seeds get a fault, e.g. {faulted[0]}"
 
-@pytest.mark.parametrize("split", ["val", "calibrate", "test", "test2"])
+@pytest.mark.parametrize("split", ["val", "calibrate", "test", "test2", "val2", "test3"])
 def test_val_calibrate_test_contain_faults(split: str) -> None:
     faults = [fault_for(split, seed) for seed in SPLITS[split]]
     assert any(f is None for f in faults), f"{split} has no healthy seeds"
@@ -76,8 +76,26 @@ def test_test2_is_seeds_400000_to_400999() -> None:
     assert SPLITS["test2"] == range(400_000, 401_000)
 
 
-def test_both_test_splits_are_locked() -> None:
-    assert set(LOCKED_SPLITS) == {"test", "test2"}
+def test_every_held_out_split_is_locked() -> None:
+    assert set(LOCKED_SPLITS) == {"test", "test2", "test3"}
+
+
+# Val2 and test3, pre-registered on 2026-11-24. Val2 is for development, test3 is held out
+
+def test_val2_and_test3_seed_ranges() -> None:
+    assert SPLITS["val2"] == range(500_000, 501_000)
+    assert SPLITS["test3"] == range(600_000, 601_000)
+
+
+def test_val2_is_open_for_development() -> None:
+    run = make_run("val2", SPLITS["val2"][1])
+    assert run.fault == fault_for("val2", SPLITS["val2"][1])
+
+
+def test_test3_is_refused_by_default() -> None:
+    # Refused before anything is simulated, so this reads no data
+    with pytest.raises(PermissionError):
+        make_run("test3", SPLITS["test3"][0])
 
 
 @pytest.mark.parametrize("split", ["test", "test2"])
