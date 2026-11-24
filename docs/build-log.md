@@ -41,9 +41,9 @@ Written before the diagnostic runs, and before any val2 data exists.
 
 ### Ledger
 - **Built by hand:** none
-- **Delegated, can explain:** none yet
-- **Delegated, not yet understood:** `calibration_offsets` and `evaluation/diagnose.py`, walked through but not yet questioned
-- **Moved:** none
+- **Delegated, can explain:** `calibration_offsets` and `evaluation/diagnose.py`, after a short teach-back
+- **Delegated, not yet understood:** none
+- **Moved:** `calibration_offsets` and `evaluation/diagnose.py`, from walked through to can explain
 
 ### Next
 N/A. This was the project's last day
