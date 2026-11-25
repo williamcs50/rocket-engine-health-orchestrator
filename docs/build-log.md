@@ -4,18 +4,23 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D12 · Wed Nov 25, 2026 · Command cross-attention ablation
 
-**Exit test (D12):** the ablation, pre-registered in the decision log (2026-11-25) and amended before the full run. The mid-run step test judges the plan's item: on val2's healthy runs, the command-aware model's median step ratio must be at least 10% lower than the ablation's on every matched seed. The primary test is reported as registered: the pooled transient share at least 20 points lower and lower on every seed, with mean recall no more than 3 points lower.
+**The question:** the model reads the throttle command through cross-attention. Does that stop it from raising false alarms when the throttle changes? This was the one unchecked item in the plan's definition of done.
 
-The ablation ran on commit `d55cc0c` with a clean tree, and the command-aware std thresholds matched D8's. **Both tests fail, so the plan's item reads "tested, not met".**
+**How it was tested:** three new models, identical to the v1 models in every way except that their throttle input is always zero, so they can't see the command. This is the ablation. All six models were scored on val2, a split no model or scoring choice was tuned on, with the bar written down before any result existed.
 
-| Test | Bar | Result |
-| --- | --- | --- |
-| Mid-run steps, judges the item | Command-aware median at least 10% lower on every seed | 0.232 against 0.241 (3.7% lower), 0.248 against 0.268 (7.5%), 0.215 against 0.257 (16.3%): fails |
-| Primary, transient share | At least 20 points lower pooled, and lower on every seed | 78.1% against 86.2%. Seeds 90.0% against 90.0%, 66.7% against 90.0%, 80.0% against 77.8%: fails |
-| Primary, recall | At most 3 points lower | 57.7% against 55.4%: holds |
+**Answer: no measurable effect at the pre-set bar, so the plan's item reads "tested, not met".** Seeing the command makes the score react a little less at throttle steps on every seed, but by less than the bar set beforehand.
 
-- 757 mid-run steps per model, on val2's 500 healthy runs. False alarms 2.0%, 2.4% and 2.0% with commands, 2.0%, 2.0% and 1.8% without.
-- Seen alongside, not part of the test: the raw median step peaks are 14 to 23% lower with commands (1.80, 1.93 and 1.75 against 2.19, 2.24 and 2.27). The command-aware thresholds are lower too (7.76 to 8.14 against 8.36 to 9.07), so dividing by them removes most of the gap.
+The run was on commit `d55cc0c` with a clean tree, and the v1 models' alarm thresholds matched D8's, so they're scored exactly as shipped.
+
+| Test | What it measures | Bar, set beforehand | Result |
+| --- | --- | --- | --- |
+| Throttle step test (judges the item) | For each mid-run throttle change in a healthy run, the highest score in the next 5 s, as a fraction of the alarm threshold. 1.0 would mean an alarm. The median over all changes | With the command at least 10% lower than without, on every seed | 0.232 against 0.241 (3.7% lower), 0.248 against 0.268 (7.5%), 0.215 against 0.257 (16.3%). Fails on two seeds |
+| Original test, false alarms | Of the healthy runs that false-alarm, the share that alarm within 5 s of a throttle change (startup included) | At least 20 points lower overall, and lower on every seed | 78.1% against 86.2% overall. Per seed 90.0% against 90.0%, 66.7% against 90.0%, 80.0% against 77.8%. Fails |
+| Original test, detection | Share of faults caught within 15 s | No more than 3 points lower | 57.7% against 55.4%. Holds |
+
+- The original test came first. The throttle step test was added before the full run, because the original also counts startup, which both models face the same way. The step test decides the plan's item, and the original is still reported.
+- Each model scored 757 throttle changes, on val2's 500 healthy runs. False alarms stayed near the 2% target for both: 2.0%, 2.4% and 2.0% with the command, 2.0%, 2.0% and 1.8% without.
+- Noticed afterwards, and not part of the test: before dividing by the threshold, the score's peak after a throttle change is 14 to 23% lower with the command (1.80, 1.93 and 1.75 against 2.19, 2.24 and 2.27). But the models that see the command also have lower thresholds (7.76 to 8.14 against 8.36 to 9.07), so dividing by them removes most of that gap.
 - Every number and per-run row is in the committed `runs/ablation/metrics.json`.
 
 ### Demo (evening)
@@ -80,7 +85,7 @@ Written before any ablation model is trained.
 - **Moved:** every item above to can explain
 
 ### Next
-1. Later, pre-registered first: whether command input lowers raw step peaks on test3, the effect seen alongside today's test
+1. A possible follow-up, not started. Today's run hinted that seeing the throttle command lowers the score's peak after a throttle change by 14 to 23%, before dividing by the alarm threshold. That was noticed after the fact, so it isn't a result. To count, the test and its bar must be written in the decision log first, then run once on test3, the last unopened held-out split
 
 ## D11 · Tue Nov 24, 2026 · v1.1, false alarms near the cap
 

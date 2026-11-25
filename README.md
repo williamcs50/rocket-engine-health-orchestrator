@@ -8,9 +8,9 @@ Engine monitoring usually checks each sensor against its own redline. A degradin
 
 ## The approach
 
-A reduced-order physics model generates engine telemetry and injects faults as physical changes, so their signatures emerge across channels on their own. Each of the 8 sensor channels is encoded separately, and an attention layer weighs the channels against each other and against the throttle command. The model is trained only on normal runs to forecast what each channel should do next, and when reality departs from the forecast, that gap is compared with the same run's recent past and with healthy runs at the same point in the throttle profile, and the result is the anomaly score. The output is an advisory verdict: a flag, a calibrated confidence and the channels that mattered most. It only advises, and redline protection keeps all authority.
+A reduced-order physics model generates engine telemetry and injects faults as physical changes, so their signatures emerge across channels on their own. Each of the 8 sensor channels is encoded separately, and an attention layer weighs the channels against each other and against the throttle command. The model is trained only on normal runs to forecast what each channel should do next, and when reality departs from the forecast, that gap is compared with the same run's recent past and with healthy runs at the same point in the throttle profile. The result is the anomaly score, called the std score below. The output is an advisory verdict: a flag, a calibrated confidence and the channels that mattered most. It only advises, and redline protection keeps all authority.
 
-> **Status:** v1 shipped Nov 23, 2026. The orchestrator passes its Gate 1 bar on a pre-registered held-out split: 58.0% of faults caught within 15 s of onset, with false alarms at most 2.6% per seed, against 35.0% for the best baseline and 0% for redlines. Daily log: [build log](docs/build-log.md) · [two-week plan](docs/two-week-plan.md)
+> **Status:** v1 shipped Nov 23, 2026, and the project closed Nov 25 after two follow-up checks (v1.1 and v1.2 below). The orchestrator passes its Gate 1 bar on a pre-registered held-out split: 58.0% of faults caught within 15 s of onset, with false alarms at most 2.6% per seed, against 35.0% for the best baseline and 0% for redlines. Daily log: [build log](docs/build-log.md) · [two-week plan](docs/two-week-plan.md)
 
 ## Installation
 
@@ -52,16 +52,16 @@ At the 2% false alarm budget (at most 10 of 500 healthy runs alarm on calibrate)
 | Detector | Test2 recall | Test2 false alarms | Test recall | Val recall |
 | --- | --- | --- | --- | --- |
 | **Orchestrator, std score (v1)** | **58.0%** | 1.8%, 2.6%, 1.4% | 58.2% | 58.1% |
-| Orchestrator, plain mean (D6 to D9) | 8.1% | 1.4%, 3.2%, 1.8% | 7.3% | 8.1% |
-| Fair z score (conditioned on throttle) | 35.0% | 2.4% | 35.2% | 39.6% |
-| D4 z score | 1.2% | 2.2% | 0.2% | 1.2% |
+| Orchestrator, earlier plain mean score (D6 to D9) | 8.1% | 1.4%, 3.2%, 1.8% | 7.3% | 8.1% |
+| Z score baseline, compared at the same throttle point | 35.0% | 2.4% | 35.2% | 39.6% |
+| Simple z score baseline | 1.2% | 2.2% | 0.2% | 1.2% |
 | Redline | 0.0% | 0.0% | 0.2% | 0.0% |
 
-- **Gate 1** (mean recall at least 5%, every seed above 1.2%, every seed's false alarms at most 3%): the std score **passes on test2**. On test it cleared the bar but was reported for information only, because it had missed on val by one false alarm. The plain mean failed on val and on test.
-- **Calibration:** the share of healthy runs with confidence at least q is within 3 points of 1 − q for q = 0.8, 0.9 and 0.95, on test and test2.
-- **Attribution:** the channels with the largest residual rise overlap the fault's true channels at 62.2% on test2, against 42.9% on healthy runs and 37.5% by chance. Attention weights don't: 42.2%, against 43.9% on healthy runs.
-- **False alarms (v1.1):** the std score's false alarms sit near the cap, at 1.4% to 3.2% per seed across splits. A pre-registered diagnostic on a fresh development split, val2, ruled out calibration offsets as the cause: offset and score swing have a Spearman correlation of about 0.06. On val2 the false alarms were 2.0%, 2.4% and 2.0%.
-- **Command cross-attention (v1.2):** a pre-registered, matched ablation on val2 compared the same models trained on an all-zero throttle history. At mid-run throttle steps the command-aware models scored lower on every seed, but by 3.7% to 16.3%, against a 10% bar on every seed, so it isn't shown. False alarms during throttle transients fell from 86.2% to 78.1% of all false alarms, against a 20 point bar. Cross-attention lowers forecast error, but at the alarm level its effect is small.
+- **Gate 1**, the pass bar set before testing (mean recall at least 5%, every seed above 1.2%, every seed's false alarms at most 3%): the std score **passes on test2**. On test it cleared the bar but was reported for information only, because it had missed on val by one false alarm. The plain mean failed on val and on test.
+- **Calibration:** the confidence means what it says. For example, about 10% of healthy runs reach a confidence of 0.9 or more. This holds within 3 points at 0.8, 0.9 and 0.95, on test and test2.
+- **Attribution:** the 3 channels whose forecast miss rose most after a fault overlap the fault's true channels at 62.2% on test2, against 42.9% on healthy runs and 37.5% by chance. Attention weights don't: 42.2%, against 43.9% on healthy runs.
+- **False alarms (v1.1):** the std score's false alarms sit near the cap, at 1.4% to 3.2% per seed across splits. A pre-registered diagnostic on a fresh development split, val2, ruled out sensor calibration offsets as the cause: a run's offset has almost no relationship to how much its score swings (Spearman correlation about 0.06). On val2 the false alarms were 2.0%, 2.4% and 2.0%.
+- **Does seeing the throttle command prevent false alarms at throttle changes? (v1.2):** tested by comparing the models with identical copies that can't see the command, on val2, with the bar set beforehand. Seeing the command made the score react less after a throttle change on every seed, but only 3.7% to 16.3% less, against a required 10% on every seed. So the effect isn't shown. Reading the command does make the forecasts more accurate, but it barely changes when alarms fire.
 
 **What was held out, and what wasn't:** val was used for three rounds of decisions, so val numbers are optimistic. Test was opened once, judged on the plain mean, with every decision committed beforehand. Test2 was pre-registered after test showed the std score clearing the bar: method, bar, seeds and a no-retry rule were committed before the split existed, and it was opened once.
 
