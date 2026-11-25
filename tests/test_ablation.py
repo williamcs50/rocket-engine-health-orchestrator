@@ -1,10 +1,15 @@
+import numpy as np
 import pytest
 
+from contracts import DT_S, N_STEPS
 from evaluation.ablation import (
-    BAR_RECALL_DROP, BAR_SHARE_MARGIN, NOCMD_MODELS, ablation_verdict, pooled_share, share, transient_counts,
+    BAR_RECALL_DROP, BAR_SHARE_MARGIN, BAR_STEP_DROP, NOCMD_MODELS, ablation_verdict, pooled_share, share,
+    step_ratios, step_verdict, step_windows, transient_counts,
 )
+from evaluation.budget import TRANSIENT_S
 from evaluation.gate1 import MODELS
 from evaluation.harness import RunResult
+from generator.engine import RAMP_UP, SHUTDOWN_WINDOW, make_throttle
 
 
 def result(false_alarm: bool = False, transient: bool = False, caught: bool = False) -> RunResult:
@@ -84,3 +89,78 @@ def test_conditions_read_as_text() -> None:
     _, conditions = ablation_verdict([(5, 10)] * 3, [(10, 10)] * 3, [0.5] * 3, [0.5] * 3)
     assert len(conditions) == 2
     assert all(isinstance(text, str) and ok for text, ok in conditions.items())
+
+
+# The mid-run step test, amended on 2026-11-25 before the full run
+
+def i(t: float) -> int:
+    return round(t / DT_S)
+
+
+def throttle_with_one_step() -> np.ndarray:
+    """Ramp to 0.8 by 3 s, a step to 0.6 at 20 s over 0.2 s, shutdown from 55 s to 58 s."""
+    t = np.arange(N_STEPS) * DT_S
+    return np.interp(t, [0.0, 3.0, 20.0, 20.2, 55.0, 58.0, 60.0], [0.0, 0.8, 0.8, 0.6, 0.6, 0.0, 0.0])
+
+
+def test_step_bar_is_as_pre_registered() -> None:
+    assert BAR_STEP_DROP == 0.10
+
+
+def test_step_windows_skip_startup_and_shutdown() -> None:
+    windows = step_windows(throttle_with_one_step())
+    assert len(windows) == 1
+    # From the step's first changing sample to 5 s after its last, the same rule transient_mask uses
+    assert windows[0].start == i(20.0) + 1
+    assert windows[0].stop == i(20.2) + i(TRANSIENT_S)
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_every_generated_run_has_one_or_two_steps_found(seed: int) -> None:
+    throttle = make_throttle(seed)
+    windows = step_windows(throttle)
+    assert len(windows) in (1, 2)
+    for w in windows:
+        assert w.start * DT_S > RAMP_UP[1]
+        # The only changes inside a window are the step's own slew, so neither startup nor shutdown gets in
+        moving = np.diff(throttle[w.start - 1:w.stop]) != 0
+        assert moving[0]
+        assert not moving[np.argmin(moving):].any()
+        assert w.start * DT_S < SHUTDOWN_WINDOW[0]
+
+
+def test_a_late_step_window_stops_where_shutdown_starts() -> None:
+    # A step at 50 s, then shutdown from 54 s, inside the step's 5 s window
+    t = np.arange(N_STEPS) * DT_S
+    throttle = np.interp(t, [0.0, 3.0, 50.0, 50.2, 54.0, 57.0, 60.0], [0.0, 0.8, 0.8, 0.6, 0.6, 0.0, 0.0])
+    (w,) = step_windows(throttle)
+    assert w.stop == i(54.0) + 1
+
+
+def test_step_ratios_are_the_peak_inside_each_window_over_the_threshold() -> None:
+    throttle = throttle_with_one_step()
+    s = np.zeros(N_STEPS)
+    # Inside the step window
+    s[i(22.0)] = 5.0
+    # Outside it, so it must not count
+    s[i(2.0)] = 100.0
+    s[i(40.0)] = 100.0
+    assert step_ratios(s, throttle, threshold=10.0) == [pytest.approx(0.5)]
+
+
+def test_step_ratios_refuse_a_threshold_that_isnt_positive() -> None:
+    with pytest.raises(ValueError):
+        step_ratios(np.zeros(N_STEPS), throttle_with_one_step(), threshold=0.0)
+
+
+def test_step_verdict_edges() -> None:
+    # Exactly 10% lower on every seed holds
+    assert step_verdict([0.45] * 3, [0.50] * 3)[0]
+    # Just under 10% lower fails
+    assert not step_verdict([0.46, 0.45, 0.45], [0.50] * 3)[0]
+    # One seed not lower fails
+    assert not step_verdict([0.30, 0.30, 0.50], [0.50] * 3)[0]
+    # An ablation median at or below 0 has no "10% lower", so it fails
+    assert not step_verdict([-0.5] * 3, [0.0] * 3)[0]
+    # No steps on a model fails
+    assert not step_verdict([None, 0.3, 0.3], [0.5] * 3)[0]

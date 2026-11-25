@@ -11,11 +11,13 @@ import time
 
 import numpy as np
 
-from evaluation.budget import FA_BUDGET
+from contracts import DT_S
+from evaluation.budget import FA_BUDGET, TRANSIENT_S
 from evaluation.final import D8_METRICS, provenance
 from evaluation.gate1 import MODELS, calibrate_thresholds, fit_detectors
 from evaluation.harness import RunResult, score_run, summarize
 from evaluation.score import mean_residual
+from generator.engine import RAMP_UP, SHUTDOWN_WINDOW
 from generator.splits import SPLITS, make_run
 from model.forecaster import residual_by_channel
 from model.train import RUNS_DIR, load_run
@@ -28,7 +30,54 @@ NOCMD_MODELS = tuple(m.replace("_cmd_", "_nocmd_") for m in MODELS)
 BAR_SHARE_MARGIN = 0.20
 # Pre-registered bar: the command-aware mean recall is at most this much lower than the ablation's
 BAR_RECALL_DROP = 0.03
+# Amended before the full run: the mid-run step test judges the plan's item. On every seed, the command-aware
+# median step ratio must be at least this much lower than the ablation's, as a fraction of the ablation's
+BAR_STEP_DROP = 0.10
 OUT = RUNS_DIR / "ablation"
+
+
+def step_windows(throttle: np.ndarray) -> list[slice]:
+    """Each mid-run throttle step, from its first changing sample to TRANSIENT_S after its last.
+
+    The same rule as transient_mask. Startup ends by RAMP_UP[1] and shutdown starts after SHUTDOWN_WINDOW[0],
+    so a change that starts between them is a commanded mid-run step. A window stops early where the next
+    change starts, so a late step's window never reaches into shutdown.
+    """
+    n = len(throttle)
+    changed = np.zeros(n, dtype=bool)
+    changed[1:] = np.diff(throttle) != 0
+    # Starts and ends of each run of consecutive changing samples. ends are one past the last changing sample
+    edges = np.diff(changed.astype(int), prepend=0, append=0)
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+    after = round(TRANSIENT_S / DT_S)
+    # Where the next change starts, or the run's end for the last one
+    next_start = [*starts[1:], n]
+    return [
+        slice(int(a), int(min(b - 1 + after, nxt)))
+        for a, b, nxt in zip(starts, ends, next_start)
+        if RAMP_UP[1] < a * DT_S < SHUTDOWN_WINDOW[0]
+    ]
+
+
+def step_ratios(s: np.ndarray, throttle: np.ndarray, threshold: float) -> list[float]:
+    """For each mid-run step, the run's peak score inside the step window over the model's threshold."""
+    if not threshold > 0:
+        raise ValueError(f"the threshold must be positive, not {threshold}")
+    return [float(np.max(s[w])) / threshold for w in step_windows(throttle)]
+
+
+def step_verdict(cmd_medians: list[float | None], nocmd_medians: list[float | None]) -> tuple[bool, dict[str, bool]]:
+    """The amended test as readable text. Medians are matched seed for seed. None means a model had no steps."""
+    pairs = list(zip(cmd_medians, nocmd_medians))
+    # A ratio at or below 0 has no meaningful "10% lower", so the seed fails
+    ok = [c is not None and n is not None and n > 0 and c <= n * (1 - BAR_STEP_DROP) + 1e-9 for c, n in pairs]
+
+    def num(x: float | None) -> str:
+        return "none" if x is None else f"{x:.3f}"
+
+    seeds = ", ".join(f"{num(c)} against {num(n)}" for c, n in pairs)
+    text = f"median step ratio at least {BAR_STEP_DROP:.0%} lower on every seed ({seeds})"
+    return all(ok), {text: all(ok)}
 
 
 def transient_counts(rows: list[tuple[bool, RunResult]]) -> tuple[int, int]:
@@ -90,6 +139,8 @@ def main(limit: int | None = None) -> None:
 
     # Model to [(run is healthy, result), ...], and one compact row per run and model for the record
     rows: dict[str, list[tuple[bool, RunResult]]] = {name: [] for name in models}
+    # Model to every mid-run step ratio on healthy runs
+    ratios: dict[str, list[float]] = {name: [] for name in models}
     record = []
     seeds = SPLITS[SPLIT][:limit]
     began = time.perf_counter()
@@ -102,9 +153,12 @@ def main(limit: int | None = None) -> None:
             s = std_scores[name].scores(mean_residual(r), run.throttle)
             result = score_run(s, run.throttle, thresholds[f"{name}/std"][FA_BUDGET], run.fault)
             rows[name].append((run.fault is None, result))
+            # Healthy runs only, so a fault's rise can't count as a reaction to a step
+            steps = step_ratios(s, run.throttle, thresholds[f"{name}/std"][FA_BUDGET]) if run.fault is None else []
+            ratios[name] += steps
             record.append({
                 "seed": int(seed), "model": name, "healthy": run.fault is None, "false_alarm": result.false_alarm,
-                "transient": result.transient_false_alarm, "caught": result.caught,
+                "transient": result.transient_false_alarm, "caught": result.caught, "step_ratios": steps,
             })
         if (i + 1) % 100 == 0:
             print(f"  {i + 1} of {len(seeds)} runs, {time.perf_counter() - began:.0f} s")
@@ -125,8 +179,18 @@ def main(limit: int | None = None) -> None:
             f"{name:28s} {thresholds[f'{name}/std'][FA_BUDGET]:9.3f} {rep.recall:7.1%} {rep.false_alarm_rate:12.1%} "
             f"{rep.transient_false_alarm_rate:10.1%} {'none' if s is None else f'{s:.1%}':>7s}"
         )
-    print(f"\nHypothesis: {'HOLDS' if passed else 'DOES NOT HOLD'}")
+    print(f"\nPrimary, as registered: {'HOLDS' if passed else 'DOES NOT HOLD'}")
     for text, ok in conditions.items():
+        print(f"  {'yes' if ok else 'no '}  {text}")
+
+    medians = {name: float(np.median(r)) if r else None for name, r in ratios.items()}
+    step_passed, step_conditions = step_verdict([medians[m] for m in MODELS], [medians[m] for m in NOCMD_MODELS])
+    print(f"\nMid-run steps, healthy runs: peak std score in the step window over the 2% threshold")
+    for name in models:
+        m = medians[name]
+        print(f"  {name:28s} {len(ratios[name]):4d} steps, median ratio {'none' if m is None else f'{m:.3f}'}")
+    print(f"Mid-run step test, which judges the plan's item: {'HOLDS' if step_passed else 'DOES NOT HOLD'}")
+    for text, ok in step_conditions.items():
         print(f"  {'yes' if ok else 'no '}  {text}")
 
     # Quick checks aren't saved, so a 20 run result can never be committed as the ablation's numbers
@@ -142,6 +206,10 @@ def main(limit: int | None = None) -> None:
             "transient_counts": {name: {"transient": t, "false_alarms": f} for name, (t, f) in counts.items()},
             "holds": passed,
             "conditions": conditions,
+            "step_medians": medians,
+            "step_counts": {name: len(r) for name, r in ratios.items()},
+            "step_holds": step_passed,
+            "step_conditions": step_conditions,
             "rows": record,
         }
         (OUT / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")

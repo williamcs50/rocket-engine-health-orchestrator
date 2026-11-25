@@ -16,6 +16,13 @@ Written before any ablation model is trained.
 | Mean recall at 2%, command-aware: about 58%. Ablation: about 55% | | |
 | Overall, the hypothesis holds: no. About 70% confident | | |
 
+**Amended before the full run (decision log, 2026-11-25):** the mid-run step test judges the plan's item. On every matched seed, the command-aware model's median step ratio (peak std score in the 5 s after a mid-run step, over its 2% threshold) must be at least 10% lower than the ablation's. Written after the `--limit 20` wiring check, before any step measure exists.
+
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Median step ratio, command-aware: about 0.45. Ablation: about 0.48. About 55% confident | | |
+| The mid-run step test holds: no. About 60% confident | | |
+
 ## D11 · Tue Nov 24, 2026 · v1.1, false alarms near the cap
 
 **Exit test (D11):** the diagnostic, pre-registered in the decision log (2026-11-24). It holds if, on val2's healthy runs, offset and swing have a Spearman correlation of at least 0.3 on every seed, and the engines that false-alarm on any seed have a higher median offset than the engines that never alarm.
