@@ -69,7 +69,6 @@ At the 2% false alarm budget (at most 10 of 500 healthy runs alarm on calibrate)
 
 ## Docs
 
-* [Demo replay](docs/demo/index.html): four real recorded runs from the model, open the file in a browser. `python -m evaluation.demo` regenerates its data
 * [Demo figure](docs/demo.png): one real caught fault, traced back to the engine's hardware
 * [Demo site](https://williamopyrchal.com/orchestrator)
 * [Design rationale](docs/design-doc.md)

@@ -19,7 +19,7 @@ The ablation ran on commit `d55cc0c` with a clean tree, and the command-aware st
 - Every number and per-run row is in the committed `runs/ablation/metrics.json`.
 
 ### Demo (evening)
-The plan's last open item, "Demo replays real exported runs", is met. `docs/demo/index.html` and `docs/demo/runs.js` are deployed over the live demo page, so the site replays the same four runs.
+The plan's last open item, "Demo replays real exported runs", is met: `docs/demo/index.html` replays four real runs.
 
 | Replayed run (val2, model seed 0) | Seed | What happens |
 | --- | --- | --- |
