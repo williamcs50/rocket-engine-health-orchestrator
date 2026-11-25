@@ -4,24 +4,83 @@ One entry per session, newest first. Full decision entries live in [architecture
 
 ## D12 · Wed Nov 25, 2026 · Command cross-attention ablation
 
-**Exit test (D12):** the ablation, pre-registered in the decision log (2026-11-25). It holds if, on val2 at the 2% budget, the command-aware models' pooled transient share is at least 20 points lower than the ablation's and lower on every matched seed, and their mean recall is no more than 3 points below the ablation's.
+**Exit test (D12):** the ablation, pre-registered in the decision log (2026-11-25) and amended before the full run. The mid-run step test judges the plan's item: on val2's healthy runs, the command-aware model's median step ratio must be at least 10% lower than the ablation's on every matched seed. The primary test is reported as registered: the pooled transient share at least 20 points lower and lower on every seed, with mean recall no more than 3 points lower.
+
+The ablation ran on commit `d55cc0c` with a clean tree, and the command-aware std thresholds matched D8's. **Both tests fail, so the plan's item reads "tested, not met".**
+
+| Test | Bar | Result |
+| --- | --- | --- |
+| Mid-run steps, judges the item | Command-aware median at least 10% lower on every seed | 0.232 against 0.241 (3.7% lower), 0.248 against 0.268 (7.5%), 0.215 against 0.257 (16.3%): fails |
+| Primary, transient share | At least 20 points lower pooled, and lower on every seed | 78.1% against 86.2%. Seeds 90.0% against 90.0%, 66.7% against 90.0%, 80.0% against 77.8%: fails |
+| Primary, recall | At most 3 points lower | 57.7% against 55.4%: holds |
+
+- 757 mid-run steps per model, on val2's 500 healthy runs. False alarms 2.0%, 2.4% and 2.0% with commands, 2.0%, 2.0% and 1.8% without.
+- Seen alongside, not part of the test: the raw median step peaks are 14 to 23% lower with commands (1.80, 1.93 and 1.75 against 2.19, 2.24 and 2.27). The command-aware thresholds are lower too (7.76 to 8.14 against 8.36 to 9.07), so dividing by them removes most of the gap.
+- Every number and per-run row is in the committed `runs/ablation/metrics.json`.
+
+### Demo (evening)
+The plan's last open item, "Demo replays real exported runs", is met. `docs/demo/index.html` and `docs/demo/runs.js` are deployed over the live demo page, so the site replays the same four runs.
+
+| Replayed run (val2, model seed 0) | Seed | What happens |
+| --- | --- | --- |
+| Healthy run, throttle steps | 500000 | No alarm. Peak confidence 0.31 |
+| Bearing wear, caught | 500001 | Onset 11.9 s, alarm 23.1 s with every channel under its redline, the highest at 84% |
+| Bearing wear, flagged too late | 500009 | Onset 12.1 s, alarm 30.1 s, outside the 15 s window, so a miss |
+| Healthy run, false alarm | 500014 | Alarm at 11.3 s with no fault, confidence 0.98 |
+
+- `evaluation/demo.py`: the four runs by fixed rules, 10 Hz replay frames with each channel's share of its redline and its forecast miss against healthy, the score, the latched alarm and the running confidence, checked against `to_verdict`. Also the static figure `docs/demo.png`
+- `docs/demo/index.html`: the site's page, with the scenarios, the playback loop, the verdict rule and the tour narration replaced. The ring, hub, 3D engine and tour mechanics are unchanged. Rendered in headless Chrome at the caught run's alarm: verdict "Coupled anomaly", confidence 99%, chips bearing temp, nozzle temp and coolant flow, and those parts lit on the engine
+- The chips at the alarm include one true fault channel of three, the logged ranking limitation, shown rather than hidden
+- Tests before code for the pure parts. 351 fast tests pass
+
+### Built
+- `Forecaster(command_input=False)`: an all-zero throttle history in `forward`, the one place training, scoring and attention pass through. Same seed, same weights
+- `--no-command`, `_nocmd` run names, and `load_run` building whichever model the config says. D7's configs, which predate the key, still load with commands
+- Three ablation models, 70 to 72 s each. End probe losses 8.27, 8.80 and 8.28, against 6.98, 7.30 and 6.05 for D7, and close to D6's 8.41, 9.02 and 7.93
+- `evaluation/ablation.py`: both tests, provenance with the ablation's weight hashes, results in `runs/ablation/metrics.json`. Step windows stop where the next change starts, after a test caught a late step reaching into shutdown on seed 17
+- The ablation weights committed under the same rule as D7's
+- Tests before code. 344 fast tests pass
+- The full run took about 26 minutes for val2, after the reference fits and calibrate
+
+### Decided
+- D6 isn't a clean ablation: a different fusion layer, the mean score, and weights not committed. So the ablation is retrained with D7's architecture and a zeroed throttle
+- The primary measure is the transient share, since at a fixed budget the threshold pins the total false alarm rate
+- Amended before the full run: the mid-run step test judges the plan's item, because the primary's transient window includes startup, which both models face the same way
+- No change after the second 20 run check, which pointed against the step test. The full run then pointed the other way
+- The plan's item reads "tested, not met". Nothing is retuned, v1 is unchanged and test3 stays untouched
 
 ### Expected vs actual
 Written before any ablation model is trained.
 
 | Expected | Actual | Why |
 | --- | --- | --- |
-| Pooled transient share, command-aware models: about 80%. Ablation: about 92%. About 65% confident | | |
-| Lower on every matched seed: no. About 55% confident | | |
-| Mean recall at 2%, command-aware: about 58%. Ablation: about 55% | | |
-| Overall, the hypothesis holds: no. About 70% confident | | |
+| Pooled transient share, command-aware models: about 80%. Ablation: about 92%. About 65% confident | 78.1% against 86.2% | Close. The ablation is lower than expected because startup alarms are transient for both models, which pulls the shares together |
+| Lower on every matched seed: no. About 55% confident | No. Seed 0 ties at 90.0%, and seed 2 is higher, 80.0% against 77.8% | Right. With about 10 false alarm runs per seed, one run moves a share by 10 points |
+| Mean recall at 2%, command-aware: about 58%. Ablation: about 55% | 57.7% against 55.4% | Right. The command-aware recall matches val and test2 |
+| Overall, the hypothesis holds: no. About 70% confident | Does not hold | Right. An 8 point drop, against a 20 point bar |
 
 **Amended before the full run (decision log, 2026-11-25):** the mid-run step test judges the plan's item. On every matched seed, the command-aware model's median step ratio (peak std score in the 5 s after a mid-run step, over its 2% threshold) must be at least 10% lower than the ablation's. Written after the `--limit 20` wiring check, before any step measure exists.
 
 | Expected | Actual | Why |
 | --- | --- | --- |
-| Median step ratio, command-aware: about 0.45. Ablation: about 0.48. About 55% confident | | |
-| The mid-run step test holds: no. About 60% confident | | |
+| Median step ratio, command-aware: about 0.45. Ablation: about 0.48. About 55% confident | 0.215 to 0.248 against 0.241 to 0.268 | The direction right, the values about half. A typical step peaks near 2 on the std score, against thresholds near 8 |
+| The mid-run step test holds: no. About 60% confident | Does not hold. Lower on every seed, but by 3.7%, 7.5% and 16.3% | Right. Commands calm the score at steps, but by less than the bar on two seeds. Most of the raw gap is canceled by the command-aware model's lower thresholds |
+
+### Learned
+- A small, consistent effect can fail a fair bar. The command-aware model is lower on every seed, but 10% was the margin set beforehand, and it holds on one seed
+- A 20 run check can point the wrong way. It showed the command-aware ratios higher on all three seeds. The full run showed them lower on all three. Not changing the test after it is what kept the result clean
+- At a fixed budget, a rate the threshold pins can't show an effect, and a ratio to each model's own threshold can hide one. Raw step peaks differ by 14 to 23%, but the better model also has lower thresholds
+- A transient window that includes startup can't isolate commanded steps. The pre-registration should have caught it. The amendment came after a 20 run check, so it's weaker than one written first
+
+### Ledger
+- **Built by hand:** none
+- **Delegated, can explain:** `command_input` in `Forecaster`, the `load_run` and `run_name` changes, `evaluation/ablation.py` (`step_windows`, `step_ratios`, `step_verdict`, `ablation_verdict`) and `tests/test_ablation.py`, after a five question teach-back without notes. One answer needed a completion: why the seed 17 window reaching into shutdown would have biased the step ratios
+- **Delegated, can explain (evening):** the demo, `evaluation/demo.py` (`smooth`, `causal_ranking`, `to_frames`, the run selection) and the replaced parts of `docs/demo/index.html`, after a three question teach-back without notes. It led to one fix: the chips are now labeled as ranked up to the alarm
+- **Delegated, not yet understood:** none
+- **Moved:** every item above to can explain
+
+### Next
+1. Later, pre-registered first: whether command input lowers raw step peaks on test3, the effect seen alongside today's test
 
 ## D11 · Tue Nov 24, 2026 · v1.1, false alarms near the cap
 
@@ -64,7 +123,7 @@ Written before the diagnostic runs, and before any val2 data exists.
 - **Built by hand:** none
 - **Delegated, can explain:** `calibration_offsets` and `evaluation/diagnose.py`, after a short teach-back
 - **Delegated, not yet understood:** none
-- **Moved:** `calibration_offsets` and `evaluation/diagnose.py`, from walked through to can explain
+- **Moved:** `calibration_offsets` and `evaluation/diagnose.py` to can explain
 
 ### Next
 N/A. This was the project's last day

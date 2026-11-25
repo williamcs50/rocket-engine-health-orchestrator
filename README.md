@@ -61,6 +61,7 @@ At the 2% false alarm budget (at most 10 of 500 healthy runs alarm on calibrate)
 - **Calibration:** the share of healthy runs with confidence at least q is within 3 points of 1 − q for q = 0.8, 0.9 and 0.95, on test and test2.
 - **Attribution:** the channels with the largest residual rise overlap the fault's true channels at 62.2% on test2, against 42.9% on healthy runs and 37.5% by chance. Attention weights don't: 42.2%, against 43.9% on healthy runs.
 - **False alarms (v1.1):** the std score's false alarms sit near the cap, at 1.4% to 3.2% per seed across splits. A pre-registered diagnostic on a fresh development split, val2, ruled out calibration offsets as the cause: offset and score swing have a Spearman correlation of about 0.06. On val2 the false alarms were 2.0%, 2.4% and 2.0%.
+- **Command cross-attention (v1.2):** a pre-registered, matched ablation on val2 compared the same models trained on an all-zero throttle history. At mid-run throttle steps the command-aware models scored lower on every seed, but by 3.7% to 16.3%, against a 10% bar on every seed, so it isn't shown. False alarms during throttle transients fell from 86.2% to 78.1% of all false alarms, against a 20 point bar. Cross-attention lowers forecast error, but at the alarm level its effect is small.
 
 **What was held out, and what wasn't:** val was used for three rounds of decisions, so val numbers are optimistic. Test was opened once, judged on the plain mean, with every decision committed beforehand. Test2 was pre-registered after test showed the std score clearing the bar: method, bar, seeds and a no-retry rule were committed before the split existed, and it was opened once.
 
@@ -68,7 +69,9 @@ At the 2% false alarm budget (at most 10 of 500 healthy runs alarm on calibrate)
 
 ## Docs
 
-* [Demo](https://williamopyrchal.com/orchestrator)
+* [Demo replay](docs/demo/index.html): four real recorded runs from the model, open the file in a browser. `python -m evaluation.demo` regenerates its data
+* [Demo figure](docs/demo.png): one real caught fault, traced back to the engine's hardware
+* [Demo site](https://williamopyrchal.com/orchestrator)
 * [Design rationale](docs/design-doc.md)
 * [Architecture](docs/architecture.md)
 * [Two-week plan](docs/two-week-plan.md)
