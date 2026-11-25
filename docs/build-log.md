@@ -2,6 +2,20 @@
 
 One entry per session, newest first. Full decision entries live in [architecture.md](architecture.md).
 
+## D12 · Wed Nov 25, 2026 · Command cross-attention ablation
+
+**Exit test (D12):** the ablation, pre-registered in the decision log (2026-11-25). It holds if, on val2 at the 2% budget, the command-aware models' pooled transient share is at least 20 points lower than the ablation's and lower on every matched seed, and their mean recall is no more than 3 points below the ablation's.
+
+### Expected vs actual
+Written before any ablation model is trained.
+
+| Expected | Actual | Why |
+| --- | --- | --- |
+| Pooled transient share, command-aware models: about 80%. Ablation: about 92%. About 65% confident | | |
+| Lower on every matched seed: no. About 55% confident | | |
+| Mean recall at 2%, command-aware: about 58%. Ablation: about 55% | | |
+| Overall, the hypothesis holds: no. About 70% confident | | |
+
 ## D11 · Tue Nov 24, 2026 · v1.1, false alarms near the cap
 
 **Exit test (D11):** the diagnostic, pre-registered in the decision log (2026-11-24). It holds if, on val2's healthy runs, offset and swing have a Spearman correlation of at least 0.3 on every seed, and the engines that false-alarm on any seed have a higher median offset than the engines that never alarm.
