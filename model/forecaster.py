@@ -29,12 +29,15 @@ AGGREGATE = "mean"
 class Forecaster(nn.Module):
     """Forecasts every channel `horizon` samples ahead from all channels' windows and the throttle history, with optional masking."""
 
-    def __init__(self, horizon: int = HORIZON) -> None:
+    def __init__(self, horizon: int = HORIZON, command_input: bool = True) -> None:
         super().__init__()
         # The throttle history must split into whole chunks, or the last token would straddle the target
         if (WINDOW + horizon) % THROTTLE_CHUNK:
             raise ValueError(f"WINDOW + horizon must be a multiple of {THROTTLE_CHUNK}, not {WINDOW + horizon}")
         self.horizon = horizon
+        # False is the D12 ablation: every throttle history becomes zeros, so cross-attention runs but carries no
+        # command information. Not a weight, so the same seed builds the same weights either way
+        self.command_input = command_input
         # Command tokens per throttle history. 11 with horizon 10
         self.n_command_tokens = (WINDOW + horizon) // THROTTLE_CHUNK
         self.encoder = ChannelEncoder()
@@ -75,6 +78,9 @@ class Forecaster(nn.Module):
 
     def forward(self, windows: torch.Tensor, throttle_hist: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """(batch, 8, WINDOW) plus (batch, WINDOW + horizon) throttle to (batch, 8): each channel `horizon` samples ahead."""
+        # The one place the ablation differs. Training, scoring and attention all come through here
+        if not self.command_input:
+            throttle_hist = torch.zeros_like(throttle_hist)
         # Channel tokens are the queries (tgt), command tokens the keys and values (memory)
         fused = self.fusion(self.tokens(windows, mask), self.command_tokens(throttle_hist))
 

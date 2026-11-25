@@ -2,6 +2,7 @@
 
 python -m model.train                  trains the default model into runs/h10_mask0.25_cmd_seed0/
 python -m model.train --mask-prob 0    trains the no-masking comparison model into runs/h10_mask0_cmd_seed0/
+python -m model.train --no-command     trains the D12 ablation into runs/h10_mask0.25_nocmd_seed0/
 """
 
 import argparse
@@ -78,7 +79,7 @@ def random_mask(batch: int, p: float, rng: np.random.Generator) -> torch.Tensor:
     return torch.from_numpy(mask)
 
 
-def architecture() -> dict[str, int | bool]:
+def architecture(command_input: bool = True) -> dict[str, int | bool]:
     """Settings that change how a model runs. A saved model only makes sense with the same ones."""
     return {
         "encoder_hidden": ENCODER_HIDDEN,
@@ -88,11 +89,15 @@ def architecture() -> dict[str, int | bool]:
         # D6 configs have neither key, so a model trained before cross-attention is refused with a clear message
         "command_aware": True,
         "throttle_chunk": THROTTLE_CHUNK,
+        # False is the D12 ablation, which reads an all-zero throttle history
+        "command_input": command_input,
     }
 
 
-def train(horizon: int = HORIZON, mask_prob: float = MASK_PROB, seed: int = 0, steps: int = STEPS) -> TrainResult:
-    """Train on healthy train runs. mask_prob=0 gives the no-masking comparison model."""
+def train(
+    horizon: int = HORIZON, mask_prob: float = MASK_PROB, seed: int = 0, steps: int = STEPS, command_input: bool = True
+) -> TrainResult:
+    """Train on healthy train runs. mask_prob=0 gives the no-masking comparison model. command_input=False the ablation."""
     # Checked here, not only in random_mask, which never runs when mask_prob is 0, negative or NaN
     if not 0.0 <= mask_prob <= 1.0:
         raise ValueError(f"mask_prob must be in [0, 1], not {mask_prob}")
@@ -102,7 +107,7 @@ def train(horizon: int = HORIZON, mask_prob: float = MASK_PROB, seed: int = 0, s
     began = time.perf_counter()
     torch.manual_seed(seed)
     # Built first, so every run starts from the same weights whatever else changes
-    model = Forecaster(horizon)
+    model = Forecaster(horizon, command_input)
 
     # Which (run, window) pairs go in each batch. Streams start at 1, since [seed, 0] equals plain seed
     sample_rng = np.random.default_rng([seed, 1])
@@ -172,7 +177,7 @@ def train(horizon: int = HORIZON, mask_prob: float = MASK_PROB, seed: int = 0, s
         "lr": LR,
         "log_every": LOG_EVERY,
         "probe_batch": PROBE_BATCH,
-        **architecture(),
+        **architecture(command_input),
         # Recorded, not checked on load. Scoring can pick either, since training never uses it
         "aggregate": AGGREGATE,
     }
@@ -184,6 +189,9 @@ def run_name(config: dict[str, Any]) -> str:
     """Folder name that says which settings made the model. :g writes 0 and 0.25, not 0.0."""
     # .get, since D6 configs have no such key and keep their names. New runs get new folders, so D6's weights survive
     cmd = "_cmd" if config.get("command_aware") else ""
+    # D7 configs have no command_input, and all of them read the throttle
+    if cmd and not config.get("command_input", True):
+        cmd = "_nocmd"
     return f"h{config['horizon']}_mask{config['mask_prob']:g}{cmd}_seed{config['seed']}"
 
 
@@ -202,12 +210,16 @@ def save_run(result: TrainResult, folder: Path) -> None:
 def load_run(folder: Path) -> TrainResult:
     """A saved run, ready for scoring. Its config sets the horizon, so scoring can't use the wrong one."""
     config = json.loads((folder / "config.json").read_text())
+    # D7's committed configs predate command_input, and every one of them read the throttle
+    command_input = config.get("command_input", True)
     # A changed head count keeps every weight shape, so the load would succeed and the model would quietly differ
-    changed = {k: (config.get(k), v) for k, v in architecture().items() if config.get(k) != v}
+    expected = architecture(command_input)
+    changed = {k: (config.get(k), v) for k, v in expected.items() if k != "command_input" and config.get(k) != v}
     if changed:
         raise ValueError(f"{folder} was trained with different settings (saved, current): {changed}")
 
-    model = Forecaster(config["horizon"])
+    # Built from the saved config, so an ablation always loads as the ablation
+    model = Forecaster(config["horizon"], command_input)
     # weights_only refuses anything but tensors, the safe way to read a model file
     model.load_state_dict(torch.load(folder / "model.pt", weights_only=True))
     metrics = json.loads((folder / "metrics.json").read_text())
@@ -223,9 +235,10 @@ if __name__ == "__main__":
     parser.add_argument("--mask-prob", type=float, default=MASK_PROB)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--steps", type=int, default=STEPS)
+    parser.add_argument("--no-command", action="store_true", help="the D12 ablation: an all-zero throttle history")
     args = parser.parse_args()
 
-    result = train(args.horizon, args.mask_prob, args.seed, args.steps)
+    result = train(args.horizon, args.mask_prob, args.seed, args.steps, command_input=not args.no_command)
     out = RUNS_DIR / run_name(result.config)
     save_run(result, out)
     print(f"saved to {out} in {result.seconds:.0f} s. Probe loss {result.losses[0]:.3f} -> {result.losses[-1]:.3f}")

@@ -57,6 +57,47 @@ def test_run_name_is_tidy(mask_prob: float, name: str) -> None:
     # Command-aware runs get their own folders, so retraining can never overwrite D6's weights
     assert run_name({"horizon": 10, "mask_prob": mask_prob, "seed": 0, "command_aware": True}) == name
 
+def test_ablation_run_name() -> None:
+    # The D12 ablation gets its own folders, so it can never overwrite the D7 models
+    config = {"horizon": 10, "mask_prob": 0.25, "seed": 1, "command_aware": True, "command_input": False}
+    assert run_name(config) == "h10_mask0.25_nocmd_seed1"
+
+
+def test_train_records_the_ablation() -> None:
+    result = train(seed=3, steps=100, command_input=False)
+    assert result.config["command_input"] is False
+    assert result.model.command_input is False
+    assert run_name(result.config) == "h10_mask0.25_nocmd_seed3"
+
+
+def test_saved_ablation_loads_as_the_ablation(tmp_path: Path) -> None:
+    torch.manual_seed(0)
+    normalizer = Normalizer.fit([constant_run(1.0), constant_run(3.0)])
+    config = {"horizon": 10, "mask_prob": 0.25, "seed": 0, **architecture(command_input=False)}
+    original = TrainResult(
+        model=Forecaster(command_input=False).eval(), normalizer=normalizer, losses=[2.0], config=config
+    )
+    save_run(original, tmp_path)
+    loaded = load_run(tmp_path)
+    assert loaded.model.command_input is False
+    assert loaded.config == original.config
+
+
+def test_d7_config_without_the_key_loads_with_commands(tmp_path: Path) -> None:
+    # D7's committed configs predate command_input, and every one of them read the throttle
+    save_run(untrained(), tmp_path)
+    config = json.loads((tmp_path / "config.json").read_text())
+    del config["command_input"]
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    assert load_run(tmp_path).model.command_input is True
+
+
+def test_d7_models_still_load() -> None:
+    # The committed weights every v1 result uses
+    for seed in range(3):
+        assert load_run(Path("runs") / f"h10_mask0.25_cmd_seed{seed}").model.command_input is True
+
+
 def test_saved_run_scores_exactly_like_the_original(tmp_path: Path) -> None:
     # Proof that what Gate 1 evaluates is exactly what was trained
     original = untrained()

@@ -10,3 +10,5 @@ runs/**
 !runs/**/metrics.*
 # Exception: the three D7 models every result uses, so a fresh clone reproduces the numbers exactly (2026-11-23)
 !runs/h10_mask0.25_cmd_seed*/model.pt
+# The D12 ablation's models, committed for the same reason (2026-11-25)
+!runs/h10_mask0.25_nocmd_seed*/model.pt

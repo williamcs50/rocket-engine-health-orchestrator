@@ -103,6 +103,31 @@ def test_masked_channel_forecast_reads_the_throttle() -> None:
     hidden_b = model(windows, thr(2), mask=mask)[:, i]
     assert not torch.allclose(hidden_a, hidden_b)
 
+def test_ablation_ignores_the_throttle() -> None:
+    # The D12 ablation: same model, but the command history is all zeros, so no throttle can change a forecast
+    model = Forecaster(horizon=HORIZON, command_input=False).eval()
+    windows = torch.randn(2, len(CHANNELS), WINDOW)
+    torch.testing.assert_close(model(windows, thr(2)), model(windows, thr(2)))
+    torch.testing.assert_close(model(windows, thr(2)), model(windows, torch.zeros(2, WINDOW + HORIZON)))
+
+
+def test_ablation_starts_from_the_same_weights() -> None:
+    # Same seed, same weights, so only the command information differs between a model and its ablation
+    torch.manual_seed(0)
+    with_commands = Forecaster(horizon=HORIZON).state_dict()
+    torch.manual_seed(0)
+    without = Forecaster(horizon=HORIZON, command_input=False).state_dict()
+    assert with_commands.keys() == without.keys()
+    for key in with_commands:
+        torch.testing.assert_close(with_commands[key], without[key])
+
+
+def test_ablation_still_checks_the_throttle_length() -> None:
+    model = Forecaster(horizon=HORIZON, command_input=False)
+    with pytest.raises(ValueError):
+        model(torch.randn(2, len(CHANNELS), WINDOW), torch.rand(2, WINDOW))
+
+
 def test_throttle_length_must_match() -> None:
     # A throttle history cut for a different horizon would be silently misaligned, so it must be refused
     model = Forecaster(horizon=HORIZON)
