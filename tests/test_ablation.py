@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 import numpy as np
 import pytest
 
@@ -50,7 +52,12 @@ def test_share_and_pooled_share() -> None:
 
 # The verdict, at its edges
 
-def verdict(cmd, nocmd, cmd_recall=(0.5, 0.5, 0.5), nocmd_recall=(0.5, 0.5, 0.5)) -> bool:
+def verdict(
+    cmd: Sequence[tuple[int, int]],
+    nocmd: Sequence[tuple[int, int]],
+    cmd_recall: Sequence[float] = (0.5, 0.5, 0.5),
+    nocmd_recall: Sequence[float] = (0.5, 0.5, 0.5),
+) -> bool:
     return ablation_verdict(list(cmd), list(nocmd), list(cmd_recall), list(nocmd_recall))[0]
 
 
@@ -140,9 +147,8 @@ def test_a_late_step_window_stops_where_shutdown_starts() -> None:
 def test_step_ratios_are_the_peak_inside_each_window_over_the_threshold() -> None:
     throttle = throttle_with_one_step()
     s = np.zeros(N_STEPS)
-    # Inside the step window
     s[i(22.0)] = 5.0
-    # Outside it, so it must not count
+    # Outside the step window, so these must not count
     s[i(2.0)] = 100.0
     s[i(40.0)] = 100.0
     assert step_ratios(s, throttle, threshold=10.0) == [pytest.approx(0.5)]

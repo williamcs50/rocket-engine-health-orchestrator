@@ -22,7 +22,6 @@ from generator.splits import SPLITS, make_run
 from model.forecaster import residual_by_channel
 from model.train import RUNS_DIR, load_run
 
-# The development split this ablation reads
 SPLIT = "val2"
 # The D12 ablation models, matched seed for seed with D7's
 NOCMD_MODELS = tuple(m.replace("_cmd_", "_nocmd_") for m in MODELS)
@@ -199,7 +198,7 @@ def main(limit: int | None = None) -> None:
         metrics = {
             "split": SPLIT,
             "provenance": provenance(),
-            # provenance hashes the D7 weights only
+            # provenance() hashes only the D7 weights, so the ablation's are recorded here
             "nocmd_sha256": {m: hashlib.sha256((RUNS_DIR / m / "model.pt").read_bytes()).hexdigest() for m in NOCMD_MODELS},
             "thresholds": {name: thresholds[f"{name}/std"][FA_BUDGET] for name in models},
             "reports": {name: {k: v for k, v in vars(rep).items()} for name, rep in reports.items()},

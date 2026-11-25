@@ -20,8 +20,9 @@ from generator.splits import SPLITS, fault_for, make_run
 from model.forecaster import aggregate, residual_by_channel
 from model.train import RUNS_DIR, load_run
 
-# D7's command-aware seeds. D6's models (h10_mask0.25_seed*, h10_mask0_seed0) are the ablation, with results in
-# runs/gate1. Reproduce them from commit c2cf7fe. The current load_run refuses them, since they predate command_aware
+# D7's command-aware seeds. D6's models (h10_mask0.25_seed*, h10_mask0_seed0) were D7's comparison, with results in
+# runs/gate1. Reproduce them from commit c2cf7fe. The current load_run refuses them, since they predate command_aware.
+# The matched ablation is D12's _nocmd models, in evaluation/ablation.py
 MODELS = ("h10_mask0.25_cmd_seed0", "h10_mask0.25_cmd_seed1", "h10_mask0.25_cmd_seed2")
 # Where results are saved. Each day's run gets its own folder, so earlier committed results stay as they were:
 # D6 in runs/gate1, D7 in runs/gate1_cmd
